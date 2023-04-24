@@ -3,11 +3,13 @@
 """The graphical part of a Thermal Conductivity step"""
 
 import pprint  # noqa: F401
+import tkinter as tk
+import tkinter.ttk as ttk
 
-import thermal_conductivity_step  # noqa: F401
+from .thermal_conductivity_parameters import ThermalConductivityParameters
 import seamm
 from seamm_util import ureg, Q_, units_class  # noqa: F401
-
+import seamm_widgets as sw
 
 
 class TkThermalConductivity(seamm.TkNode):
@@ -46,7 +48,7 @@ class TkThermalConductivity(seamm.TkNode):
         self,
         tk_flowchart=None,
         node=None,
-        namespace="org.molssi.seamm.thermal_conductivity.tk",
+        namespace="org.molssi.seamm.tk",
         canvas=None,
         x=None,
         y=None,
@@ -112,7 +114,7 @@ class TkThermalConductivity(seamm.TkNode):
         TkThermalConductivity.reset_dialog
         """
 
-        frame = super().create_dialog(title="Thermal Conductivity")
+        frame = super().create_dialog(title="Thermal Conductivity", widget="notebook")
         # make it large!
         screen_w = self.dialog.winfo_screenwidth()
         screen_h = self.dialog.winfo_screenheight()
@@ -123,12 +125,117 @@ class TkThermalConductivity(seamm.TkNode):
 
         self.dialog.geometry(f"{w}x{h}+{x}+{y}")
 
+        # Add a frame for the flowchart
+        notebook = self["notebook"]
+        flowchart_frame = ttk.Frame(notebook)
+        self["flowchart frame"] = frame
+        notebook.add(flowchart_frame, text="Flowchart", sticky=tk.NSEW)
+
         self.tk_subflowchart = seamm.TkFlowchart(
-            master=frame,
+            master=flowchart_frame,
             flowchart=self.node.subflowchart,
-            namespace=self.namespace
+            namespace=self.namespace,
         )
         self.tk_subflowchart.draw()
+
+        # Fill in the control parameters
+        # Shortcut for parameters
+        P = self.node.parameters
+
+        # conductivity frame to isolate widgets
+        frame = self["conductivity_frame"] = ttk.LabelFrame(
+            self["frame"],
+            borderwidth=4,
+            relief="sunken",
+            text="Thermal Conductivity",
+            labelanchor="n",
+            padding=10,
+        )
+
+        for key in ThermalConductivityParameters.parameters:
+            self[key] = P[key].widget(frame)
+
+        # and binding to change as needed
+        self["approach"].combobox.bind(
+            "<<ComboboxSelected>>", self.reset_conductivity_frame
+        )
+
+        # and lay them out
+        self.reset_dialog()
+
+    def reset_dialog(self, widget=None):
+        """Layout the widgets in the dialog.
+
+        The widgets are chosen by default from the information in
+        Thermal Conductivity_parameter.
+
+        This function simply lays them out row by row with
+        aligned labels. You may wish a more complicated layout that
+        is controlled by values of some of the control parameters.
+        If so, edit or override this method
+
+        Parameters
+        ----------
+        widget : Tk Widget = None
+
+        Returns
+        -------
+        None
+
+        See Also
+        --------
+        TkThermalConductivity.create_dialog
+        """
+
+        row = 0
+
+        self["conductivity_frame"].grid(row=row, column=0, sticky=tk.EW, pady=10)
+        row += 1
+        self.reset_conductivity_frame()
+
+        return row
+
+    def reset_conductivity_frame(self, widget=None):
+        """Layout the widgets in the conductivity frame
+        as needed for the current state"""
+
+        approach = self["approach"].get()
+
+        frame = self["conductivity_frame"]
+        for slave in frame.grid_slaves():
+            slave.grid_forget()
+
+        row = 0
+
+        # Main controls
+        widgets = []
+        for key in ("approach", "T", "nruns", "errors"):
+            self[key].grid(row=row, column=0, columnspan=2, sticky=tk.W)
+            widgets.append(self[key])
+            row += 1
+
+        widgets0 = []
+        if "RNEMD" in approach:
+            for key in ("nlayers", "swap frequency", "n to swap"):
+                self[key].grid(row=row, column=1, sticky=tk.W)
+                widgets0.append(self[key])
+                row += 1
+        elif "Thermostatted" in approach:
+            for key in ("nlayers", "deltaT"):
+                self[key].grid(row=row, column=1, sticky=tk.W)
+                widgets0.append(self[key])
+                row += 1
+        elif "Heat Removal" in approach:
+            for key in ("nlayers", "ehex"):
+                self[key].grid(row=row, column=1, sticky=tk.W)
+                widgets0.append(self[key])
+                row += 1
+
+        sw.align_labels(widgets, sticky=tk.E)
+        if len(widgets0) > 0:
+            sw.align_labels(widgets0, sticky=tk.E)
+
+        frame.columnconfigure(0, minsize=50)
 
     def right_click(self, event):
         """

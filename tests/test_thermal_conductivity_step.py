@@ -10,4 +10,7 @@ import thermal_conductivity_step  # noqa: F401
 def test_construction():
     """Just create an object and test its type."""
     result = thermal_conductivity_step.ThermalConductivity()
-    assert str(type(result)) == "<class 'thermal_conductivity_step.thermal_conductivity.ThermalConductivity'>"
+    assert str(type(result)) == (
+        "<class 'thermal_conductivity_step.thermal_conductivity"
+        ".ThermalConductivity'>"
+    )

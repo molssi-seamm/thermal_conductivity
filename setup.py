@@ -83,5 +83,5 @@ setup(
         'org.molssi.seamm.tk': [
             'Thermal Conductivity = thermal_conductivity_step:ThermalConductivityStep',
         ],
-    }
+     },
 )

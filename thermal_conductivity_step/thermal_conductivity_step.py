@@ -33,7 +33,7 @@ class ThermalConductivityStep(object):
 
     my_description = {
         "description": "An interface for Thermal Conductivity",
-        "group": "Simulations",
+        "group": "Properties",
         "name": "Thermal Conductivity",
     }
 
@@ -63,7 +63,9 @@ class ThermalConductivityStep(object):
         ThermalConductivity
         """
 
-        return thermal_conductivity_step.ThermalConductivity(flowchart=flowchart, **kwargs)
+        return thermal_conductivity_step.ThermalConductivity(
+            flowchart=flowchart, **kwargs
+        )
 
     def create_tk_node(self, canvas=None, **kwargs):
         """Create and return the graphical Tk node object.

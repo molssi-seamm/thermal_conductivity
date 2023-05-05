@@ -18,9 +18,11 @@ from .analysis import (
     create_helfand_moments,
     fit_green_kubo_integral,
     fit_helfand_moment,
+    get_helfand_slope,
     plot_correlation_functions,
     plot_GK_integrals,
     plot_helfand_moments,
+    plot_helfand_slopes,
 )
 from .thermal_conductivity_parameters import ThermalConductivityParameters
 import thermal_conductivity_step
@@ -197,7 +199,7 @@ class ThermalConductivity(seamm.Node):
 
         return self.next()
 
-    def description_text(self, P=None):
+    def description_text(self, P=None, short=False):
         """Create the text description of what this step will do.
         The dictionary of control values is passed in as P so that
         the code can test values, etc.
@@ -215,38 +217,43 @@ class ThermalConductivity(seamm.Node):
         if P is None:
             P = self.parameters.values_to_dict()
 
-        # The subflowchart
-        self.subflowchart.root_directory = self.flowchart.root_directory
-
-        # Get the first real node
-        node = self.subflowchart.get_node("1").next()
-
         text = (
             f"Calculate the thermal conductivity at {P['T']} using "
             f"the {P['approach']} approach. {P['nruns']} runs will be averaged for "
             "the final results.\n\n"
         )
-        while node is not None:
-            try:
-                text += __(node.description_text()).__str__()
-            except Exception as e:
-                print(f"Error describing thermal_conductivity flowchart: {e} in {node}")
-                logger.critical(
-                    f"Error describing thermal_conductivity flowchart: {e} in {node}"
-                )
-                raise
-            except:  # noqa: E722
-                print(
-                    "Unexpected error describing thermal_conductivity flowchart: "
-                    f"{sys.exc_info()[0]} in {str(node)}"
-                )
-                logger.critical(
-                    "Unexpected error describing thermal_conductivity flowchart: "
-                    f"{sys.exc_info()[0]} in {str(node)}"
-                )
-                raise
-            text += "\n"
-            node = node.next()
+        if not short:
+            # The subflowchart
+            self.subflowchart.root_directory = self.flowchart.root_directory
+
+            # Get the first real node
+            node = self.subflowchart.get_node("1").next()
+
+            while node is not None:
+                try:
+                    text += __(node.description_text()).__str__()
+                except Exception as e:
+                    print(
+                        f"Error describing thermal_conductivity flowchart: {e} in "
+                        f"{node}"
+                    )
+                    logger.critical(
+                        f"Error describing thermal_conductivity flowchart: {e} in "
+                        f"{node}"
+                    )
+                    raise
+                except:  # noqa: E722
+                    print(
+                        "Unexpected error describing thermal_conductivity flowchart: "
+                        f"{sys.exc_info()[0]} in {str(node)}"
+                    )
+                    logger.critical(
+                        "Unexpected error describing thermal_conductivity flowchart: "
+                        f"{sys.exc_info()[0]} in {str(node)}"
+                    )
+                    raise
+                text += "\n"
+                node = node.next()
 
         return self.header + "\n" + __(text, **P, indent=4 * " ").__str__()
 
@@ -270,7 +277,7 @@ class ThermalConductivity(seamm.Node):
         )
 
         # Print what we are doing
-        printer.important(__(self.description_text(P), indent=self.indent))
+        printer.important(__(self.description_text(P, short=True), indent=self.indent))
 
         # Find the handler for job.out and set the level up
         job_handler = None
@@ -376,7 +383,7 @@ class ThermalConductivity(seamm.Node):
 
         return next_node
 
-    def analyze(self, indent="", P=None, style="full", **kwargs):
+    def analyze(self, indent="", P=None, style="full", run=None, **kwargs):
         """Do any analysis of the output from this step.
 
         Also print important results to the local step.out file using
@@ -417,10 +424,74 @@ class ThermalConductivity(seamm.Node):
         ts = np.arange(self.M.shape[1]) * dt.m_as("ps")  # Scale to ps
         ts = ts.tolist()
 
+        # Get and plot the slopes of the Helfand moments
+        slopes = []
+        xs = []
+        errs = []
+        fit0 = []
+        for i in range(6):
+            slope, x, err = get_helfand_slope(self.M[i], ts, sigma=self.M_err[i])
+            slopes.append(slope)
+            xs.append(x)
+            errs.append(err)
+
+            if i < 3:
+                (
+                    kappa,
+                    kappa_err,
+                    a,
+                    a_err,
+                    tau,
+                    tau_err,
+                    tf,
+                    yf,
+                ) = fit_green_kubo_integral(slope, x, sigma=err)
+                # print(f"{kappa=} {tau=}")
+                fit0.append(
+                    {
+                        "kappa": kappa,
+                        "stderr": kappa_err,
+                        "xs": tf,
+                        "ys": yf,
+                        "a": a,
+                        "a_err": a_err,
+                        "tau": tau,
+                        "tau_err": tau_err,
+                    }
+                )
+
+        figure = self.create_figure(
+            module_path=("seamm",),
+            template="line.graph_template",
+            title="Helfand Slopes",
+        )
+
+        plot_helfand_slopes(
+            figure, slopes, xs[0], err=errs, fit=fit0, labels=self.tensor_labels
+        )
+
+        figure.grid_plots("Slope")
+
+        # Write to disk
+        filename = "Helfand_slopes.graph"
+        path = Path(self.directory) / filename
+        figure.dump(path)
+
+        if "html" in self.options and self.options["html"]:
+            path = path.with_suffix(".html")
+            figure.template = "line.html_template"
+            figure.dump(path)
+
         # Fit the slopes
         fit = []
         for i in range(6):
-            slope, err, xs, ys = fit_helfand_moment(self.M[i], ts, sigma=self.M_err[i])
+            if i < len(fit0):
+                start = max(fit0[i]["tau"]) * 3
+            else:
+                start = 1
+            slope, err, xs, ys = fit_helfand_moment(
+                self.M[i], ts, sigma=self.M_err[i], start=start
+            )
             fit.append(
                 {
                     "kappa": slope,
@@ -479,10 +550,6 @@ class ThermalConductivity(seamm.Node):
             try:
                 v, e = fmt_err(kappa, 2 * kappa_err)
             except Exception:
-                print(f"{a=}")
-                print(f"{a_err=}")
-                print(f"{tau=}")
-                print(f"{tau_err=}")
                 v = f"{kappa:.2f}"
                 e = "--"
 
@@ -524,11 +591,20 @@ class ThermalConductivity(seamm.Node):
                 text += "\n"
                 text += "Thermal Conductivity".center(length)
                 text += "\n"
+                text += "--------------------".center(length)
+                text += "\n"
+                text += "First line is Helfand moments; second, Green-Kubo".center(
+                    length
+                )
+                text += "\n"
                 text += "\n".join(tmp.splitlines()[0:-1])
             else:
                 text = tmp.splitlines()[-3]
                 text += "\n"
                 text += tmp.splitlines()[-2]
+                if run is not None and run == P["nruns"]:
+                    text += "\n"
+                    text += tmp.splitlines()[-1]
 
             printer.normal(__(text, indent=8 * " ", wrap=False, dedent=False))
         else:
@@ -588,7 +664,10 @@ class ThermalConductivity(seamm.Node):
             if tau > max_tau:
                 max_tau = tau
 
-        rng = [0, max_tau * 4]
+        if max_tau * 4 > ts[-1]:
+            rng = None
+        else:
+            rng = [0, max_tau * 4]
         plot_GK_integrals(
             figure, x, ts, err=err, fit=fit, labels=self.tensor_labels, _range=rng
         )
@@ -715,14 +794,18 @@ class ThermalConductivity(seamm.Node):
         k_B = Q_("k_B")
         Jsq = Q_("W^2/m^4")
 
+        # Limit the lengths of the data
+        n = J.shape[1]
+        m = min(n // 20, 10000)
+
         # Create the Helfand moments
         constants = Jsq * V * dt**2 / (2 * k_B * T**2)
-        M = create_helfand_moments(J) * constants.m_as("W/m/K*ps")
+        M = create_helfand_moments(J, m=m) * constants.m_as("W/m/K*ps")
         self.Ms.append(M)
 
         # And correlation functions for Green-Kubo method
         constants = V / (k_B * T**2) * Jsq * dt
-        Jcf, integral = create_correlation_functions(J)
+        Jcf, integral = create_correlation_functions(J, m=m)
         self.Jcfs.append(Jcf)
         self.GK_integrals.append(integral * constants.m_as("W/m/K"))
         # Merge the results and get the averages and errors

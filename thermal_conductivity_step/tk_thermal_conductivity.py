@@ -128,7 +128,7 @@ class TkThermalConductivity(seamm.TkNode):
         # Add a frame for the flowchart
         notebook = self["notebook"]
         flowchart_frame = ttk.Frame(notebook)
-        self["flowchart frame"] = frame
+        self["flowchart frame"] = flowchart_frame
         notebook.add(flowchart_frame, text="Flowchart", sticky=tk.NSEW)
 
         self.tk_subflowchart = seamm.TkFlowchart(

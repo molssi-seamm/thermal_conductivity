@@ -2,6 +2,11 @@
 History
 =======
 
+2023.5.6 -- Bugfix
+    * Fixed an error handling Nan's and Inf's that caused a crash
+    * Added the predictions from the derivatives of the Helfand moments to the output to
+      give a better feel for the quality of the results.
+      
 2023.5.5 -- Improved analysis
     * Considerable improvements to the analysis, results now seem solid
     * Fixed issues with fitting the linear portion of the Helfand moments

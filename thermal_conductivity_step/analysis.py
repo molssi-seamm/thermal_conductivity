@@ -249,7 +249,7 @@ def fit_green_kubo_integral(y, xs, sigma=None):
         tau_err = [err[1], err[3]]
         kappa = a[0] + a[1]
         kappa_err = a_err[0] + a_err[1]
-        if kappa > 2 * a1:  # Shouldn't change this much!
+        if kappa < 0 or abs(kappa) > 2 * abs(a1):  # Shouldn't change this much!
             err = np.sqrt(np.diag(pcov1)).tolist()
             a = [popt1[0]]
             a_err = [err[0]]

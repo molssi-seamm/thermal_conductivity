@@ -53,12 +53,23 @@ if path.exists():
 
 
 def fmt_err(value, err, precision=2):
-    decimals = -ceil(log10(err)) + precision
-    if decimals < 0:
-        decimals = 0
-    fmt = f".{decimals}f"
-    e = f"{err:{fmt}}"
-    v = f"{value:{fmt}}"
+    try:
+        decimals = -ceil(log10(err)) + precision
+    except Exception:
+        e = "--"
+        try:
+            v = f"{value:.2f}"
+        except Exception:
+            v = value
+    else:
+        if decimals < 0:
+            decimals = 0
+        fmt = f".{decimals}f"
+        e = f"{err:{fmt}}"
+        try:
+            v = f"{value:{fmt}}"
+        except Exception:
+            v = value
     return v, e
 
 
@@ -446,7 +457,6 @@ class ThermalConductivity(seamm.Node):
                     tf,
                     yf,
                 ) = fit_green_kubo_integral(slope, x, sigma=err)
-                # print(f"{kappa=} {tau=}")
                 fit0.append(
                     {
                         "kappa": kappa,
@@ -459,11 +469,31 @@ class ThermalConductivity(seamm.Node):
                         "tau_err": tau_err,
                     }
                 )
+                v, e = fmt_err(kappa, 2 * kappa_err)
+                if style == "1-line":
+                    if i == 0:
+                        table["Run"].append(len(self.V))
+                    alpha = self.tensor_labels[i][0]
+                    table["K" + alpha].append(v)
+                    table["e" + alpha].append(e)
+                elif style == "full":
+                    table["Method"].append("Helfand Derivative" if i == 0 else "")
+                    table["Dir"].append(self.tensor_labels[i][0])
+                    table["Kappa"].append(v)
+                    table["±"].append("±")
+                    table["95%"].append(e)
+                    table["Units"].append("W/m/K" if i == 0 else "")
+            else:
+                if style == "1-line":
+                    # blank the off-diagonals
+                    alpha = self.tensor_labels[i][0]
+                    table["K" + alpha].append("")
+                    table["e" + alpha].append("")
 
         figure = self.create_figure(
             module_path=("seamm",),
             template="line.graph_template",
-            title="Helfand Slopes",
+            title="Helfand Derivatives",
         )
 
         plot_helfand_slopes(
@@ -473,7 +503,7 @@ class ThermalConductivity(seamm.Node):
         figure.grid_plots("Slope")
 
         # Write to disk
-        filename = "Helfand_slopes.graph"
+        filename = "HelfandDerivatives.graph"
         path = Path(self.directory) / filename
         figure.dump(path)
 
@@ -502,13 +532,11 @@ class ThermalConductivity(seamm.Node):
             )
             v, e = fmt_err(slope, 2 * err)
             if style == "1-line":
-                if i == 0:
-                    table["Run"].append(len(self.V))
                 alpha = self.tensor_labels[i][0]
                 table["K" + alpha].append(v)
                 table["e" + alpha].append(e)
             elif style == "full":
-                table["Method"].append("Helfand" if i == 0 else "")
+                table["Method"].append("Helfand Moments" if i == 0 else "")
                 table["Dir"].append(self.tensor_labels[i][0])
                 table["Kappa"].append(v)
                 table["±"].append("±")
@@ -547,11 +575,7 @@ class ThermalConductivity(seamm.Node):
                     "tau_err": tau_err,
                 }
             )
-            try:
-                v, e = fmt_err(kappa, 2 * kappa_err)
-            except Exception:
-                v = f"{kappa:.2f}"
-                e = "--"
+            v, e = fmt_err(kappa, 2 * kappa_err)
 
             if style == "1-line":
                 if i == 0:
@@ -593,18 +617,18 @@ class ThermalConductivity(seamm.Node):
                 text += "\n"
                 text += "--------------------".center(length)
                 text += "\n"
-                text += "First line is Helfand moments; second, Green-Kubo".center(
-                    length
-                )
+                text += "First line is the fit to Helfand derivative".center(length)
+                text += "\n"
+                text += "Second line is the slope of the Helfand moments".center(length)
+                text += "\n"
+                text += "Third line is the fit to Green-Kubo integral".center(length)
                 text += "\n"
                 text += "\n".join(tmp.splitlines()[0:-1])
             else:
-                text = tmp.splitlines()[-3]
-                text += "\n"
-                text += tmp.splitlines()[-2]
                 if run is not None and run == P["nruns"]:
-                    text += "\n"
-                    text += tmp.splitlines()[-1]
+                    text += "\n".join(tmp.splitlines()[-4:])
+                else:
+                    text += "\n".join(tmp.splitlines()[-4:-1])
 
             printer.normal(__(text, indent=8 * " ", wrap=False, dedent=False))
         else:
@@ -796,7 +820,7 @@ class ThermalConductivity(seamm.Node):
 
         # Limit the lengths of the data
         n = J.shape[1]
-        m = min(n // 20, 10000)
+        m = min(n // 10, 10000)
 
         # Create the Helfand moments
         constants = Jsq * V * dt**2 / (2 * k_B * T**2)

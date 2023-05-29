@@ -255,6 +255,6 @@ class TkThermalConductivity(seamm.TkNode):
         """
 
         super().right_click(event)
-        self.popup_menu.add_command(label="Edit..", command=self.edit)
+        self.popup_menu.add_command(label="Edit...", command=self.edit)
 
         self.popup_menu.tk_popup(event.x_root, event.y_root, 0)

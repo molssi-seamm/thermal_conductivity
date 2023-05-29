@@ -2,6 +2,8 @@
 History
 =======
 
+2023.5.29 -- Converged with general approach for trajectory analysis
+
 2023.5.6 -- Bugfix
     * Fixed an error handling Nan's and Inf's that caused a crash
     * Added the predictions from the derivatives of the Helfand moments to the output to

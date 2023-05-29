@@ -3,6 +3,7 @@
 """Non-graphical part of the Thermal Conductivity step in a SEAMM flowchart
 """
 
+import json
 import logging
 from math import log10, ceil
 from pathlib import Path
@@ -11,6 +12,7 @@ import sys
 import traceback
 
 import numpy as np
+import pandas
 from tabulate import tabulate
 
 from .analysis import (
@@ -29,7 +31,7 @@ import thermal_conductivity_step
 import molsystem
 import seamm
 import seamm_util
-from seamm_util import ureg, Q_  # noqa: F401
+from seamm_util import Q_
 import seamm_util.printing as printing
 from seamm_util.printing import FormattedText as __
 
@@ -792,29 +794,75 @@ class ThermalConductivity(seamm.Node):
         run_dir : pathlib.Path
             The toplevel directory of the run.
         """
-        paths = sorted(run_dir.glob("**/HeatFlux.npz"))
+        paths = sorted(run_dir.glob("**/heat_flux.trj"))
 
         if len(paths) == 0:
-            raise RuntimeError(f"There is no heat flux data for run {run}.")
+            raise RuntimeError(
+                f"There is no heat flux data for run {run} in {run_dir}."
+            )
         elif len(paths) > 1:
             raise NotImplementedError(
-                f"Cannot handle multiple HeatFlux files from run {run}."
+                f"Cannot handle multiple HeatFlux files from run {run} in {run_dir}."
             )
-        with np.load(paths[0]) as data:
-            V = float(data["V"])
-            T = float(data["T"])
-            timestep = float(data["timestep"])
 
-            J = data["J"]
+        # Process the trajectory data
+        control_properties = lambda x: x not in ["tstep"]  # noqa: E731
+        with paths[0].open() as fd:
+            # Get the initial header line and check
+            line = fd.readline()
+            tmp = line.split()
+            if len(tmp) < 3:
+                raise RuntimeError(f"Bad header for {paths[0]}: {line}")
+            if tmp[0] != "!MolSSI":
+                raise RuntimeError(f"Not a MolSSI file? {paths[0]}: {line}")
+            if tmp[1] != "trajectory":
+                raise RuntimeError(f"Not a trajectory file? {paths[0]}: {line}")
+            if tmp[2][0] != "2":
+                raise RuntimeError(
+                    f"Can only handle version 2 trajectory files. {paths[0]}: {line}"
+                )
+            metadata = json.loads(" ".join(tmp[3:]))
 
-        self.V.append(V)
-        self.T.append(T)
-        self.timestep.append(timestep)
+            data = pandas.read_csv(
+                fd,
+                sep=" ",
+                header=0,
+                comment="!",
+                usecols=control_properties,
+                index_col=None,
+            )
+
+        dt = Q_(metadata["dt"], metadata["tunits"])
+        data = data.reset_index(drop=True)
+        data.index *= dt.m_as("fs")
+
+        Jx = data["Jx"].to_numpy()
+        Jy = data["Jy"].to_numpy()
+        Jz = data["Jz"].to_numpy()
+
+        J = np.stack((Jx, Jy, Jz))
+
+        # Get the state function V & T
+        path = paths[0].parent / "state.json"
+        if path.exists():
+            with path.open() as fd:
+                state = json.load(fd)
+            T = state["T"]["mean"]
+            if "V" in state:
+                V = state["V"]["mean"]
+            else:
+                _, configuration = self.get_system_configuration()
+                V = configuration.volume
+            self.V.append(V)
+            self.T.append(T)
+        else:
+            self.V.append(None)
+            self.T.append(None)
+        self.timestep.append(dt.magnitude)
 
         # We need properties like the temperature and volume.
         T = Q_(T, "K")
         V = Q_(V, "Å^3")
-        dt = Q_(timestep, "fs")
         k_B = Q_("k_B")
         Jsq = Q_("W^2/m^4")
 

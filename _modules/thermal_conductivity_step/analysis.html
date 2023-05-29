@@ -503,13 +503,13 @@ document.write(`
 <span class="n">tau1</span> <span class="o">=</span> <span class="mi">0</span>
 
 
-<div class="viewcode-block" id="moving_average"><a class="viewcode-back" href="../../developer/thermal_conductivity_step.html#thermal_conductivity_step.analysis.moving_average">[docs]</a><span class="k">def</span> <span class="nf">moving_average</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+<div class="viewcode-block" id="moving_average"><a class="viewcode-back" href="../../api/thermal_conductivity_step.html#thermal_conductivity_step.analysis.moving_average">[docs]</a><span class="k">def</span> <span class="nf">moving_average</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
     <span class="n">ret</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">cumsum</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span>
     <span class="n">ret</span><span class="p">[</span><span class="n">n</span><span class="p">:]</span> <span class="o">=</span> <span class="n">ret</span><span class="p">[</span><span class="n">n</span><span class="p">:]</span> <span class="o">-</span> <span class="n">ret</span><span class="p">[:</span><span class="o">-</span><span class="n">n</span><span class="p">]</span>
     <span class="k">return</span> <span class="n">ret</span><span class="p">[</span><span class="n">n</span> <span class="o">-</span> <span class="mi">1</span> <span class="p">:]</span> <span class="o">/</span> <span class="n">n</span></div>
 
 
-<div class="viewcode-block" id="frequencies"><a class="viewcode-back" href="../../developer/thermal_conductivity_step.html#thermal_conductivity_step.analysis.frequencies">[docs]</a><span class="k">def</span> <span class="nf">frequencies</span><span class="p">(</span><span class="n">data</span><span class="p">):</span>
+<div class="viewcode-block" id="frequencies"><a class="viewcode-back" href="../../api/thermal_conductivity_step.html#thermal_conductivity_step.analysis.frequencies">[docs]</a><span class="k">def</span> <span class="nf">frequencies</span><span class="p">(</span><span class="n">data</span><span class="p">):</span>
     <span class="n">ps</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">fft</span><span class="o">.</span><span class="n">rfft</span><span class="p">(</span><span class="n">data</span><span class="p">))</span> <span class="o">**</span> <span class="mi">2</span>
 
     <span class="c1"># time_step = 1 / 100</span>
@@ -520,28 +520,28 @@ document.write(`
         <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">freqs</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">ps</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="si">:</span><span class="s2">12.0f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span></div>
 
 
-<div class="viewcode-block" id="exp_1"><a class="viewcode-back" href="../../developer/thermal_conductivity_step.html#thermal_conductivity_step.analysis.exp_1">[docs]</a><span class="k">def</span> <span class="nf">exp_1</span><span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">tau</span><span class="p">):</span>
+<div class="viewcode-block" id="exp_1"><a class="viewcode-back" href="../../api/thermal_conductivity_step.html#thermal_conductivity_step.analysis.exp_1">[docs]</a><span class="k">def</span> <span class="nf">exp_1</span><span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">tau</span><span class="p">):</span>
     <span class="k">return</span> <span class="n">a</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="n">t</span> <span class="o">/</span> <span class="n">tau</span><span class="p">))</span></div>
 
 
-<div class="viewcode-block" id="exp_1a"><a class="viewcode-back" href="../../developer/thermal_conductivity_step.html#thermal_conductivity_step.analysis.exp_1a">[docs]</a><span class="k">def</span> <span class="nf">exp_1a</span><span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="n">a2</span><span class="p">,</span> <span class="n">tau2</span><span class="p">):</span>
+<div class="viewcode-block" id="exp_1a"><a class="viewcode-back" href="../../api/thermal_conductivity_step.html#thermal_conductivity_step.analysis.exp_1a">[docs]</a><span class="k">def</span> <span class="nf">exp_1a</span><span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="n">a2</span><span class="p">,</span> <span class="n">tau2</span><span class="p">):</span>
     <span class="k">global</span> <span class="n">a1</span><span class="p">,</span> <span class="n">tau1</span>
     <span class="k">return</span> <span class="n">a1</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="n">t</span> <span class="o">/</span> <span class="n">tau1</span><span class="p">))</span> <span class="o">+</span> <span class="n">a2</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="n">t</span> <span class="o">/</span> <span class="n">tau2</span><span class="p">))</span></div>
 
 
-<div class="viewcode-block" id="exp_2"><a class="viewcode-back" href="../../developer/thermal_conductivity_step.html#thermal_conductivity_step.analysis.exp_2">[docs]</a><span class="k">def</span> <span class="nf">exp_2</span><span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="n">a1</span><span class="p">,</span> <span class="n">tau1</span><span class="p">,</span> <span class="n">a2</span><span class="p">,</span> <span class="n">tau2</span><span class="p">):</span>
+<div class="viewcode-block" id="exp_2"><a class="viewcode-back" href="../../api/thermal_conductivity_step.html#thermal_conductivity_step.analysis.exp_2">[docs]</a><span class="k">def</span> <span class="nf">exp_2</span><span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="n">a1</span><span class="p">,</span> <span class="n">tau1</span><span class="p">,</span> <span class="n">a2</span><span class="p">,</span> <span class="n">tau2</span><span class="p">):</span>
     <span class="k">return</span> <span class="n">a1</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="n">t</span> <span class="o">/</span> <span class="n">tau1</span><span class="p">))</span> <span class="o">+</span> <span class="n">a2</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="n">t</span> <span class="o">/</span> <span class="n">tau2</span><span class="p">))</span></div>
 
 
-<div class="viewcode-block" id="axb"><a class="viewcode-back" href="../../developer/thermal_conductivity_step.html#thermal_conductivity_step.analysis.axb">[docs]</a><span class="k">def</span> <span class="nf">axb</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">):</span>
+<div class="viewcode-block" id="axb"><a class="viewcode-back" href="../../api/thermal_conductivity_step.html#thermal_conductivity_step.analysis.axb">[docs]</a><span class="k">def</span> <span class="nf">axb</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">):</span>
     <span class="k">return</span> <span class="n">a</span> <span class="o">*</span> <span class="n">x</span> <span class="o">+</span> <span class="n">b</span></div>
 
 
-<div class="viewcode-block" id="fit_h"><a class="viewcode-back" href="../../developer/thermal_conductivity_step.html#thermal_conductivity_step.analysis.fit_h">[docs]</a><span class="k">def</span> <span class="nf">fit_h</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">tau</span><span class="p">):</span>
+<div class="viewcode-block" id="fit_h"><a class="viewcode-back" href="../../api/thermal_conductivity_step.html#thermal_conductivity_step.analysis.fit_h">[docs]</a><span class="k">def</span> <span class="nf">fit_h</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">tau</span><span class="p">):</span>
     <span class="k">return</span> <span class="n">a</span> <span class="o">*</span> <span class="p">(</span><span class="n">tau</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="n">x</span> <span class="o">/</span> <span class="n">tau</span><span class="p">)</span> <span class="o">+</span> <span class="n">x</span><span class="p">)</span> <span class="o">+</span> <span class="n">b</span></div>
 
 
-<div class="viewcode-block" id="acf_err"><a class="viewcode-back" href="../../developer/thermal_conductivity_step.html#thermal_conductivity_step.analysis.acf_err">[docs]</a><span class="k">def</span> <span class="nf">acf_err</span><span class="p">(</span><span class="n">acf</span><span class="p">):</span>
+<div class="viewcode-block" id="acf_err"><a class="viewcode-back" href="../../api/thermal_conductivity_step.html#thermal_conductivity_step.analysis.acf_err">[docs]</a><span class="k">def</span> <span class="nf">acf_err</span><span class="p">(</span><span class="n">acf</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;The standard error of the autocorrelation function.</span>
 
 <span class="sd">    Copied from statsmodels.tsa.stattools.acf</span>
@@ -555,7 +555,7 @@ document.write(`
     <span class="k">return</span> <span class="n">std</span></div>
 
 
-<div class="viewcode-block" id="ccf_err"><a class="viewcode-back" href="../../developer/thermal_conductivity_step.html#thermal_conductivity_step.analysis.ccf_err">[docs]</a><span class="k">def</span> <span class="nf">ccf_err</span><span class="p">(</span><span class="n">acf1</span><span class="p">,</span> <span class="n">acf2</span><span class="p">):</span>
+<div class="viewcode-block" id="ccf_err"><a class="viewcode-back" href="../../api/thermal_conductivity_step.html#thermal_conductivity_step.analysis.ccf_err">[docs]</a><span class="k">def</span> <span class="nf">ccf_err</span><span class="p">(</span><span class="n">acf1</span><span class="p">,</span> <span class="n">acf2</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;The standard error of crosscorrelation functions.</span>
 
 <span class="sd">    Copied from statsmodels.tsa.stattools.acf</span>
@@ -569,7 +569,7 @@ document.write(`
     <span class="k">return</span> <span class="n">std</span></div>
 
 
-<div class="viewcode-block" id="create_correlation_functions"><a class="viewcode-back" href="../../developer/thermal_conductivity_step.html#thermal_conductivity_step.analysis.create_correlation_functions">[docs]</a><span class="k">def</span> <span class="nf">create_correlation_functions</span><span class="p">(</span><span class="n">J</span><span class="p">,</span> <span class="n">m</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<div class="viewcode-block" id="create_correlation_functions"><a class="viewcode-back" href="../../api/thermal_conductivity_step.html#thermal_conductivity_step.analysis.create_correlation_functions">[docs]</a><span class="k">def</span> <span class="nf">create_correlation_functions</span><span class="p">(</span><span class="n">J</span><span class="p">,</span> <span class="n">m</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Create the correlation functions of the heat fluxes.</span>
 
 <span class="sd">    Parameters</span>
@@ -606,7 +606,7 @@ document.write(`
     <span class="k">return</span> <span class="n">ccf</span><span class="p">,</span> <span class="n">integral</span></div>
 
 
-<div class="viewcode-block" id="create_helfand_moments"><a class="viewcode-back" href="../../developer/thermal_conductivity_step.html#thermal_conductivity_step.analysis.create_helfand_moments">[docs]</a><span class="k">def</span> <span class="nf">create_helfand_moments</span><span class="p">(</span><span class="n">J</span><span class="p">,</span> <span class="n">m</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<div class="viewcode-block" id="create_helfand_moments"><a class="viewcode-back" href="../../api/thermal_conductivity_step.html#thermal_conductivity_step.analysis.create_helfand_moments">[docs]</a><span class="k">def</span> <span class="nf">create_helfand_moments</span><span class="p">(</span><span class="n">J</span><span class="p">,</span> <span class="n">m</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Create the Helfand moments from heat fluxes.</span>
 
 <span class="sd">    Parameters</span>
@@ -644,7 +644,7 @@ document.write(`
     <span class="k">return</span> <span class="n">M</span></div>
 
 
-<div class="viewcode-block" id="fit_green_kubo_integral"><a class="viewcode-back" href="../../developer/thermal_conductivity_step.html#thermal_conductivity_step.analysis.fit_green_kubo_integral">[docs]</a><span class="k">def</span> <span class="nf">fit_green_kubo_integral</span><span class="p">(</span><span class="n">y</span><span class="p">,</span> <span class="n">xs</span><span class="p">,</span> <span class="n">sigma</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<div class="viewcode-block" id="fit_green_kubo_integral"><a class="viewcode-back" href="../../api/thermal_conductivity_step.html#thermal_conductivity_step.analysis.fit_green_kubo_integral">[docs]</a><span class="k">def</span> <span class="nf">fit_green_kubo_integral</span><span class="p">(</span><span class="n">y</span><span class="p">,</span> <span class="n">xs</span><span class="p">,</span> <span class="n">sigma</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Find the best a * (1 - exp(-tau/t)) form.</span>
 
 <span class="sd">    Parameters</span>
@@ -766,7 +766,7 @@ document.write(`
     <span class="k">return</span> <span class="n">kappa</span><span class="p">,</span> <span class="n">kappa_err</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">a_err</span><span class="p">,</span> <span class="n">tau</span><span class="p">,</span> <span class="n">tau_err</span><span class="p">,</span> <span class="n">xs</span><span class="p">[</span><span class="mi">1</span><span class="p">:</span><span class="n">nf</span><span class="p">],</span> <span class="n">fy</span></div>
 
 
-<div class="viewcode-block" id="fit_helfand_moment"><a class="viewcode-back" href="../../developer/thermal_conductivity_step.html#thermal_conductivity_step.analysis.fit_helfand_moment">[docs]</a><span class="k">def</span> <span class="nf">fit_helfand_moment</span><span class="p">(</span><span class="n">y</span><span class="p">,</span> <span class="n">xs</span><span class="p">,</span> <span class="n">sigma</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">start</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
+<div class="viewcode-block" id="fit_helfand_moment"><a class="viewcode-back" href="../../api/thermal_conductivity_step.html#thermal_conductivity_step.analysis.fit_helfand_moment">[docs]</a><span class="k">def</span> <span class="nf">fit_helfand_moment</span><span class="p">(</span><span class="n">y</span><span class="p">,</span> <span class="n">xs</span><span class="p">,</span> <span class="n">sigma</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">start</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Find the best linear fit to longest possible segment.</span>
 
 <span class="sd">    Parameters</span>
@@ -817,7 +817,7 @@ document.write(`
     <span class="k">return</span> <span class="n">slope</span><span class="p">,</span> <span class="n">err</span><span class="p">,</span> <span class="n">xs</span><span class="p">[</span><span class="n">i</span><span class="p">:],</span> <span class="n">ys</span></div>
 
 
-<div class="viewcode-block" id="get_helfand_slope"><a class="viewcode-back" href="../../developer/thermal_conductivity_step.html#thermal_conductivity_step.analysis.get_helfand_slope">[docs]</a><span class="k">def</span> <span class="nf">get_helfand_slope</span><span class="p">(</span><span class="n">y</span><span class="p">,</span> <span class="n">xs</span><span class="p">,</span> <span class="n">sigma</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<div class="viewcode-block" id="get_helfand_slope"><a class="viewcode-back" href="../../api/thermal_conductivity_step.html#thermal_conductivity_step.analysis.get_helfand_slope">[docs]</a><span class="k">def</span> <span class="nf">get_helfand_slope</span><span class="p">(</span><span class="n">y</span><span class="p">,</span> <span class="n">xs</span><span class="p">,</span> <span class="n">sigma</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the instantaneous slope of the Helfand moments</span>
 
 <span class="sd">    Parameters</span>
@@ -855,7 +855,7 @@ document.write(`
     <span class="k">return</span> <span class="n">slope</span><span class="p">,</span> <span class="n">new_x</span><span class="p">,</span> <span class="n">new_sigma</span></div>
 
 
-<div class="viewcode-block" id="plot_correlation_functions"><a class="viewcode-back" href="../../developer/thermal_conductivity_step.html#thermal_conductivity_step.analysis.plot_correlation_functions">[docs]</a><span class="k">def</span> <span class="nf">plot_correlation_functions</span><span class="p">(</span>
+<div class="viewcode-block" id="plot_correlation_functions"><a class="viewcode-back" href="../../api/thermal_conductivity_step.html#thermal_conductivity_step.analysis.plot_correlation_functions">[docs]</a><span class="k">def</span> <span class="nf">plot_correlation_functions</span><span class="p">(</span>
     <span class="n">figure</span><span class="p">,</span> <span class="n">CCF</span><span class="p">,</span> <span class="n">ts</span><span class="p">,</span> <span class="n">err</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">fit</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">labels</span><span class="o">=</span><span class="n">tensor_labels</span>
 <span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Create a plot for the heat flux cross-correlation functions.</span>
@@ -933,7 +933,7 @@ document.write(`
     <span class="k">return</span> <span class="n">plot</span></div>
 
 
-<div class="viewcode-block" id="plot_GK_integrals"><a class="viewcode-back" href="../../developer/thermal_conductivity_step.html#thermal_conductivity_step.analysis.plot_GK_integrals">[docs]</a><span class="k">def</span> <span class="nf">plot_GK_integrals</span><span class="p">(</span>
+<div class="viewcode-block" id="plot_GK_integrals"><a class="viewcode-back" href="../../api/thermal_conductivity_step.html#thermal_conductivity_step.analysis.plot_GK_integrals">[docs]</a><span class="k">def</span> <span class="nf">plot_GK_integrals</span><span class="p">(</span>
     <span class="n">figure</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">ts</span><span class="p">,</span> <span class="n">err</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">fit</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">labels</span><span class="o">=</span><span class="n">tensor_labels</span><span class="p">,</span> <span class="n">_range</span><span class="o">=</span><span class="kc">None</span>
 <span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Create a plot of the Green-Kubo integrals</span>
@@ -1018,7 +1018,7 @@ document.write(`
     <span class="k">return</span> <span class="n">plot</span></div>
 
 
-<div class="viewcode-block" id="plot_helfand_moments"><a class="viewcode-back" href="../../developer/thermal_conductivity_step.html#thermal_conductivity_step.analysis.plot_helfand_moments">[docs]</a><span class="k">def</span> <span class="nf">plot_helfand_moments</span><span class="p">(</span><span class="n">figure</span><span class="p">,</span> <span class="n">M</span><span class="p">,</span> <span class="n">ts</span><span class="p">,</span> <span class="n">err</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">fit</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">labels</span><span class="o">=</span><span class="n">tensor_labels</span><span class="p">):</span>
+<div class="viewcode-block" id="plot_helfand_moments"><a class="viewcode-back" href="../../api/thermal_conductivity_step.html#thermal_conductivity_step.analysis.plot_helfand_moments">[docs]</a><span class="k">def</span> <span class="nf">plot_helfand_moments</span><span class="p">(</span><span class="n">figure</span><span class="p">,</span> <span class="n">M</span><span class="p">,</span> <span class="n">ts</span><span class="p">,</span> <span class="n">err</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">fit</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">labels</span><span class="o">=</span><span class="n">tensor_labels</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Create a plot for the Helfand moments.</span>
 
 <span class="sd">    Parameters</span>
@@ -1088,7 +1088,7 @@ document.write(`
     <span class="k">return</span> <span class="n">plot</span></div>
 
 
-<div class="viewcode-block" id="plot_helfand_slopes"><a class="viewcode-back" href="../../developer/thermal_conductivity_step.html#thermal_conductivity_step.analysis.plot_helfand_slopes">[docs]</a><span class="k">def</span> <span class="nf">plot_helfand_slopes</span><span class="p">(</span>
+<div class="viewcode-block" id="plot_helfand_slopes"><a class="viewcode-back" href="../../api/thermal_conductivity_step.html#thermal_conductivity_step.analysis.plot_helfand_slopes">[docs]</a><span class="k">def</span> <span class="nf">plot_helfand_slopes</span><span class="p">(</span>
     <span class="n">figure</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">ts</span><span class="p">,</span> <span class="n">err</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">fit</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">labels</span><span class="o">=</span><span class="n">tensor_labels</span><span class="p">,</span> <span class="n">_range</span><span class="o">=</span><span class="kc">None</span>
 <span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Create a plot of the slope of the Helfand moments</span>

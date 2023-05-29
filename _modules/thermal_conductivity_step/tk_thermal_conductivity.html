@@ -495,7 +495,7 @@ document.write(`
 <span class="kn">import</span> <span class="nn">seamm_widgets</span> <span class="k">as</span> <span class="nn">sw</span>
 
 
-<div class="viewcode-block" id="TkThermalConductivity"><a class="viewcode-back" href="../../developer/thermal_conductivity_step.html#thermal_conductivity_step.tk_thermal_conductivity.TkThermalConductivity">[docs]</a><span class="k">class</span> <span class="nc">TkThermalConductivity</span><span class="p">(</span><span class="n">seamm</span><span class="o">.</span><span class="n">TkNode</span><span class="p">):</span>
+<div class="viewcode-block" id="TkThermalConductivity"><a class="viewcode-back" href="../../api/thermal_conductivity_step.html#thermal_conductivity_step.tk_thermal_conductivity.TkThermalConductivity">[docs]</a><span class="k">class</span> <span class="nc">TkThermalConductivity</span><span class="p">(</span><span class="n">seamm</span><span class="o">.</span><span class="n">TkNode</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    The graphical part of a Thermal Conductivity step in a flowchart.</span>
 
@@ -578,7 +578,7 @@ document.write(`
         <span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">create_dialog</span><span class="p">()</span>
 
-<div class="viewcode-block" id="TkThermalConductivity.create_dialog"><a class="viewcode-back" href="../../developer/thermal_conductivity_step.html#thermal_conductivity_step.tk_thermal_conductivity.TkThermalConductivity.create_dialog">[docs]</a>    <span class="k">def</span> <span class="nf">create_dialog</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<div class="viewcode-block" id="TkThermalConductivity.create_dialog"><a class="viewcode-back" href="../../api/thermal_conductivity_step.html#thermal_conductivity_step.tk_thermal_conductivity.TkThermalConductivity.create_dialog">[docs]</a>    <span class="k">def</span> <span class="nf">create_dialog</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Create the dialog. A set of widgets will be chosen by default</span>
 <span class="sd">        based on what is specified in the Thermal Conductivity_parameters</span>
@@ -646,7 +646,7 @@ document.write(`
         <span class="c1"># and lay them out</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">reset_dialog</span><span class="p">()</span></div>
 
-<div class="viewcode-block" id="TkThermalConductivity.reset_dialog"><a class="viewcode-back" href="../../developer/thermal_conductivity_step.html#thermal_conductivity_step.tk_thermal_conductivity.TkThermalConductivity.reset_dialog">[docs]</a>    <span class="k">def</span> <span class="nf">reset_dialog</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">widget</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<div class="viewcode-block" id="TkThermalConductivity.reset_dialog"><a class="viewcode-back" href="../../api/thermal_conductivity_step.html#thermal_conductivity_step.tk_thermal_conductivity.TkThermalConductivity.reset_dialog">[docs]</a>    <span class="k">def</span> <span class="nf">reset_dialog</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">widget</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Layout the widgets in the dialog.</span>
 
 <span class="sd">        The widgets are chosen by default from the information in</span>
@@ -678,7 +678,7 @@ document.write(`
 
         <span class="k">return</span> <span class="n">row</span></div>
 
-<div class="viewcode-block" id="TkThermalConductivity.reset_conductivity_frame"><a class="viewcode-back" href="../../developer/thermal_conductivity_step.html#thermal_conductivity_step.tk_thermal_conductivity.TkThermalConductivity.reset_conductivity_frame">[docs]</a>    <span class="k">def</span> <span class="nf">reset_conductivity_frame</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">widget</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<div class="viewcode-block" id="TkThermalConductivity.reset_conductivity_frame"><a class="viewcode-back" href="../../api/thermal_conductivity_step.html#thermal_conductivity_step.tk_thermal_conductivity.TkThermalConductivity.reset_conductivity_frame">[docs]</a>    <span class="k">def</span> <span class="nf">reset_conductivity_frame</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">widget</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Layout the widgets in the conductivity frame</span>
 <span class="sd">        as needed for the current state&quot;&quot;&quot;</span>
 
@@ -720,7 +720,7 @@ document.write(`
 
         <span class="n">frame</span><span class="o">.</span><span class="n">columnconfigure</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">minsize</span><span class="o">=</span><span class="mi">50</span><span class="p">)</span></div>
 
-<div class="viewcode-block" id="TkThermalConductivity.right_click"><a class="viewcode-back" href="../../developer/thermal_conductivity_step.html#thermal_conductivity_step.tk_thermal_conductivity.TkThermalConductivity.right_click">[docs]</a>    <span class="k">def</span> <span class="nf">right_click</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">event</span><span class="p">):</span>
+<div class="viewcode-block" id="TkThermalConductivity.right_click"><a class="viewcode-back" href="../../api/thermal_conductivity_step.html#thermal_conductivity_step.tk_thermal_conductivity.TkThermalConductivity.right_click">[docs]</a>    <span class="k">def</span> <span class="nf">right_click</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">event</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Handles the right click event on the node.</span>
 

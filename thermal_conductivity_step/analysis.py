@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
 
 """Routines to help do Green-Kubo and Helfand moments analysis."""
+import logging
+import pprint
 import warnings
 
 import numpy as np
 from scipy.integrate import cumulative_trapezoid
 from scipy.optimize import curve_fit, OptimizeWarning
 import statsmodels.tsa.stattools as stattools
+
+logger = logging.getLogger("thermal_conductivity")
 
 tensor_labels = [
     ("xx", "red", "rgba(255,0,0,0.1)"),
@@ -283,7 +287,7 @@ def fit_green_kubo_integral(y, xs, sigma=None):
     return kappa, kappa_err, a, a_err, tau, tau_err, xs[1:nf], fy
 
 
-def fit_helfand_moment(y, xs, sigma=None, start=1):
+def fit_helfand_moment(y, xs, sigma=None, start=1, logger=logger):
     """Find the best linear fit to longest possible segment.
 
     Parameters
@@ -313,7 +317,7 @@ def fit_helfand_moment(y, xs, sigma=None, start=1):
     # We know the curves curve near the origin, so ignore the first part
     i = int(start / dx)
     if i > len(y):
-        i = int(1 / dx)
+        i = len(y) // 2
 
     popt, pcov, infodict, msg, ierr = curve_fit(
         axb,
@@ -323,6 +327,14 @@ def fit_helfand_moment(y, xs, sigma=None, start=1):
         sigma=sigma[i:],
         absolute_sigma=True,
     )
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug("")
+        logger.debug(f"{popt=}")
+        logger.debug(f"{pcov=}")
+        logger.debug(pprint.pformat(infodict, compact=True))
+        logger.debug(f"{msg=}")
+        logger.debug(f"{ierr=}")
+
     slope = float(popt[0])
     b = float(popt[1])
     err = float(np.sqrt(np.diag(pcov)[0]))

@@ -250,7 +250,7 @@ class ThermalConductivity(seamm.Node):
                         f"Error describing thermal_conductivity flowchart: {e} in "
                         f"{node}"
                     )
-                    logger.critical(
+                    self.logger.critical(
                         f"Error describing thermal_conductivity flowchart: {e} in "
                         f"{node}"
                     )
@@ -260,7 +260,7 @@ class ThermalConductivity(seamm.Node):
                         "Unexpected error describing thermal_conductivity flowchart: "
                         f"{sys.exc_info()[0]} in {str(node)}"
                     )
-                    logger.critical(
+                    self.logger.critical(
                         "Unexpected error describing thermal_conductivity flowchart: "
                         f"{sys.exc_info()[0]} in {str(node)}"
                     )
@@ -521,29 +521,50 @@ class ThermalConductivity(seamm.Node):
                 start = max(fit0[i]["tau"]) * 3
             else:
                 start = 1
-            slope, err, xs, ys = fit_helfand_moment(
-                self.M[i], ts, sigma=self.M_err[i], start=start
-            )
-            fit.append(
-                {
-                    "kappa": slope,
-                    "stderr": err,
-                    "xs": xs,
-                    "ys": ys,
-                }
-            )
-            v, e = fmt_err(slope, 2 * err)
-            if style == "1-line":
-                alpha = self.tensor_labels[i][0]
-                table["K" + alpha].append(v)
-                table["e" + alpha].append(e)
-            elif style == "full":
-                table["Method"].append("Helfand Moments" if i == 0 else "")
-                table["Dir"].append(self.tensor_labels[i][0])
-                table["Kappa"].append(v)
-                table["±"].append("±")
-                table["95%"].append(e)
-                table["Units"].append("W/m/K" if i == 0 else "")
+            if start < 1:
+                start = 1
+
+            if self.logger.isEnabledFor(logging.DEBUG):
+                self.logger.debug("\n\n\n**********************\n")
+                self.logger.debug(f"{i=}")
+                for v1, v2, v3 in zip(ts[0:9], self.M[i][0:9], self.M_err[i][0:9]):
+                    self.logger.debug(f"   {v1:.3f} {v2:12.4e} {v3:12.4e}")
+                self.logger.debug("...")
+                for v1, v2, v3 in zip(
+                    ts[-9:-1], self.M[i][-9:-1], self.M_err[i][-9:-1]
+                ):
+                    self.logger.debug(f"   {v1:.3f} {v2:12.4e} {v3:12.4e}")
+                self.logger.debug(f"{start=}")
+                self.logger.debug("--------")
+                self.logger.debug("")
+
+            try:
+                slope, err, xs, ys = fit_helfand_moment(
+                    self.M[i], ts, sigma=self.M_err[i], start=start, logger=self.logger
+                )
+                fit.append(
+                    {
+                        "kappa": slope,
+                        "stderr": err,
+                        "xs": xs,
+                        "ys": ys,
+                    }
+                )
+                v, e = fmt_err(slope, 2 * err)
+                if style == "1-line":
+                    alpha = self.tensor_labels[i][0]
+                    table["K" + alpha].append(v)
+                    table["e" + alpha].append(e)
+                elif style == "full":
+                    table["Method"].append("Helfand Moments" if i == 0 else "")
+                    table["Dir"].append(self.tensor_labels[i][0])
+                    table["Kappa"].append(v)
+                    table["±"].append("±")
+                    table["95%"].append(e)
+                    table["Units"].append("W/m/K" if i == 0 else "")
+            except Exception as e:
+                logger.warning("The fit of the Helfand moments failed. Continuing...")
+                logger.warning(e)
 
         self.plot_helfand_moment(self.M, ts, M_err=self.M_err, fit=fit)
 

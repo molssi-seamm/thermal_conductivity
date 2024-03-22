@@ -317,6 +317,9 @@ class ThermalConductivity(seamm.Node):
             node.all_options = self.all_options
             node = node.next()
 
+        # And the subflowchart has the executor
+        self.subflowchart.executor = self.flowchart.executor
+
         # Loop over the runs
         nruns = P["nruns"]
         fmt = f"0{len(str(nruns))}"

@@ -1,11 +1,15 @@
 =======
 History
 =======
-2024.3.22 -- Updated for new scheme for running background jobs.
+2024.6.3 -- Bugfix: handling of options for subflowchart
+    * Fixed a bug where the options for the subflowchart were not being parsed
+      correctly.
+      
+2024.3.22 -- Updated for new scheme for running background tasks.
 
 2024.1.5 -- Bugfix: Thermal conductivity
     * If the Helfand moments fit in the thermal conductivity step failed it stopped the
-      entire job. This is correct, as well as some of the undelying causes for
+      entire job. This is fixed, as well as some of the underlying causes for
       convergence issues.
       
 2023.5.29 -- Converged with general approach for trajectory analysis

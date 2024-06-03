@@ -189,6 +189,8 @@ class ThermalConductivity(seamm.Node):
         parser_name = "thermal-conductivity-step"
         parser = seamm_util.getParser()
 
+        self.subflowchart._parser = self.flowchart._parser
+
         # Remember if the parser exists ... this type of step may have been
         # found before
         parser_exists = parser.exists(parser_name)
@@ -206,6 +208,7 @@ class ThermalConductivity(seamm.Node):
             )
 
         # Now need to walk through the steps in the subflowchart...
+        self.subflowchart.reset_visited()
         node = self.subflowchart.get_node("1").next()
         while node is not None:
             node = node.create_parser()

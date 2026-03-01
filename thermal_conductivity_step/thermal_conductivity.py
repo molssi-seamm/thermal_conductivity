@@ -3,11 +3,11 @@
 """Non-graphical part of the Thermal Conductivity step in a SEAMM flowchart
 """
 
+import importlib
 import json
 import logging
 from math import log10, ceil
 from pathlib import Path
-import pkg_resources
 import sys
 import traceback
 
@@ -48,7 +48,7 @@ job = printing.getPrinter()
 printer = printing.getPrinter("Thermal Conductivity")
 
 # Add this module's properties to the standard properties
-path = Path(pkg_resources.resource_filename(__name__, "data/"))
+path = importlib.resources.files("thermal_conductivity_step") / "data"
 csv_file = path / "properties.csv"
 if path.exists():
     molsystem.add_properties_from_file(csv_file)

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """Routines to help do Green-Kubo and Helfand moments analysis."""
+
 import logging
 import pprint
 import warnings

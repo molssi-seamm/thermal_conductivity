@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 
-"""Non-graphical part of the Thermal Conductivity step in a SEAMM flowchart
-"""
+"""Non-graphical part of the Thermal Conductivity step in a SEAMM flowchart"""
 
 import importlib
 import json

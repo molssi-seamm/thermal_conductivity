@@ -1,6 +1,8 @@
 =======
 History
 =======
+2026.3.1 -- Internal: switching from deprecated library pkg_resources to importlib
+
 2024.6.3 -- Bugfix: handling of options for subflowchart
     * Fixed a bug where the options for the subflowchart were not being parsed
       correctly.

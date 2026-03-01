@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 
-"""This file contains metadata describing the results from ThermalConductivity
-"""
+"""This file contains metadata describing the results from ThermalConductivity"""
 
 metadata = {}
 

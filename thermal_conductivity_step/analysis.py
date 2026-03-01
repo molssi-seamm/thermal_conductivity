@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """Routines to help do Green-Kubo and Helfand moments analysis."""
+
 import logging
 import pprint
 import warnings
@@ -46,7 +47,6 @@ def exp_1(t, a, tau):
 
 
 def exp_1a(t, a2, tau2):
-    global a1, tau1
     return a1 * (1 - np.exp(-t / tau1)) + a2 * (1 - np.exp(-t / tau2))
 
 

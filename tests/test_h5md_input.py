@@ -54,3 +54,20 @@ def test_non_periodic_is_refused(tmp_path):
 def test_no_h5md_returns_none(tmp_path):
     tc = ThermalConductivity.__new__(ThermalConductivity)
     assert tc._read_h5md(1, tmp_path) is None
+
+
+def test_blocks_split_one_run():
+    J = np.ones((3, 10000))
+    blocks = ThermalConductivity._split_into_blocks((J, "dt", 300.0, 5000.0), 4)
+    assert len(blocks) == 4
+    assert all(b[0].shape == (3, 2500) for b in blocks)
+    assert blocks[2][2:] == (300.0, 5000.0)
+    with pytest.raises(RuntimeError, match="too few"):
+        ThermalConductivity._split_into_blocks((J, "dt", 300.0, 5000.0), 20)
+
+
+def test_requirements():
+    tc = ThermalConductivity.__new__(ThermalConductivity)
+    (need,) = tc.md_requirements().needs
+    assert need.names == ["heat_flux"]
+    assert need.max_steps == 2

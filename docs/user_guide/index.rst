@@ -37,6 +37,36 @@ heat flux, the temperature and the volume from the ``md.h5md`` file that the LAM
 step writes for each MD run. Runs made with older versions of the LAMMPS step, which
 have no ``md.h5md``, are read from their text files as before.
 
+
+Where the MD comes from
+=======================
+
+**MD to analyze** chooses where the MD comes from:
+
+run the MD in the sub-flowchart
+    As before: the step runs its sub-flowchart, usually a LAMMPS step, the given
+    number of times, and the errors come from the spread of the runs. Sampling that
+    the analysis needs and the MD lacks is turned on in the last MD sub-step, with a
+    note in the output.
+the last MD run
+    The last MD run earlier in the flowchart that sampled what the step needs. One
+    production run can feed several analysis steps, and the sub-flowchart is not used.
+the last MD run of each loop iteration
+    For a LAMMPS step inside a Loop: the run of each iteration, analyzed as
+    independent runs.
+files
+    The ``md.h5md`` files given, each an independent run; ``job://<n>/<path>`` reads a
+    file of job ``n``.
+
+A single run is divided into **Blocks for errors from one run** (5 by default),
+analyzed separately to estimate the errors; each block must be much longer than the
+correlation time. Before the job runs, the step checks that the MD before it samples
+what it needs, and the job does not start if it does not.
+
+The step needs the heat flux sampled every two timesteps, as the Heat Flux sub-step of
+LAMMPS does. MD from elsewhere is analyzed by the Green-Kubo approach at its own
+temperature.
+
 ..
     <remove the dots above and this line and unindent the toctree to expose it>
     Contents:

@@ -1,6 +1,16 @@
 =======
 History
 =======
+2026.10.14 -- Bugfix: crash with coarse sampling of the heat flux
+    * The Green–Kubo fit failed when the heat flux was sampled less often than every
+      0.4 ps. It no longer fails.
+    * The analysis now uses the shared ``seamm_md_analysis`` library, also used by the
+      Diffusivity step, instead of its own copy. The results are the same, and the
+      Helfand moments are computed much faster (by FFT): for a million samples, 0.4 s
+      instead of about 2 minutes.
+    * The step no longer needs pandas or statsmodels, and its tests run with uv in CI
+      using the package's declared dependencies.
+
 2026.3.1 -- Internal: switching from deprecated library pkg_resources to importlib
 
 2024.6.3 -- Bugfix: handling of options for subflowchart

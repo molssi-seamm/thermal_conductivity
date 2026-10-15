@@ -15,16 +15,6 @@ from .tk_thermal_conductivity import TkThermalConductivity
 
 from .metadata import metadata
 
-from .analysis import (
-    create_correlation_functions,
-    create_helfand_moments,
-    fit_green_kubo_integral,
-    fit_helfand_moment,
-    plot_correlation_functions,
-    plot_GK_integrals,
-    plot_helfand_moments,
-)
-
 # Handle versioneer
 from ._version import get_versions
 

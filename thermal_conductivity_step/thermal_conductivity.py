@@ -5,26 +5,28 @@
 import importlib
 import json
 import logging
-from math import log10, ceil
 from pathlib import Path
 import sys
 import traceback
 
 import numpy as np
-import pandas
-from tabulate import tabulate
-
-from .analysis import (
-    create_correlation_functions,
-    create_helfand_moments,
+from seamm_md_analysis import (
+    collective_helfand_moments,
     fit_green_kubo_integral,
     fit_helfand_moment,
-    get_helfand_slope,
+    helfand_slope,
+    read_trajectory,
+    tensor_correlation_functions,
+)
+import seamm_md_analysis.stats
+from seamm_md_analysis.plots import (
     plot_correlation_functions,
     plot_GK_integrals,
     plot_helfand_moments,
     plot_helfand_slopes,
 )
+from tabulate import tabulate
+
 from .thermal_conductivity_parameters import ThermalConductivityParameters
 import thermal_conductivity_step
 import molsystem
@@ -54,24 +56,10 @@ if path.exists():
 
 
 def fmt_err(value, err, precision=2):
-    try:
-        decimals = -ceil(log10(err)) + precision
-    except Exception:
-        e = "--"
-        try:
-            v = f"{value:.2f}"
-        except Exception:
-            v = value
-    else:
-        if decimals < 0:
-            decimals = 0
-        fmt = f".{decimals}f"
-        e = f"{err:{fmt}}"
-        try:
-            v = f"{value:{fmt}}"
-        except Exception:
-            v = value
-    return v, e
+    """Format a value and its error, with 2 decimals when the error is unusable."""
+    return seamm_md_analysis.stats.fmt_err(
+        value, err, precision=precision, fallback_decimals=2
+    )
 
 
 class ThermalConductivity(seamm.Node):
@@ -448,7 +436,7 @@ class ThermalConductivity(seamm.Node):
         errs = []
         fit0 = []
         for i in range(6):
-            slope, x, err = get_helfand_slope(self.M[i], ts, sigma=self.M_err[i])
+            slope, x, err = helfand_slope(self.M[i], ts, sigma=self.M_err[i])
             slopes.append(slope)
             xs.append(x)
             errs.append(err)
@@ -832,39 +820,12 @@ class ThermalConductivity(seamm.Node):
             )
 
         # Process the trajectory data
-        control_properties = lambda x: x not in ["tstep"]  # noqa: E731
-        with paths[0].open() as fd:
-            # Get the initial header line and check
-            line = fd.readline()
-            tmp = line.split()
-            if len(tmp) < 3:
-                raise RuntimeError(f"Bad header for {paths[0]}: {line}")
-            if tmp[0] != "!MolSSI":
-                raise RuntimeError(f"Not a MolSSI file? {paths[0]}: {line}")
-            if tmp[1] != "trajectory":
-                raise RuntimeError(f"Not a trajectory file? {paths[0]}: {line}")
-            if tmp[2][0] != "2":
-                raise RuntimeError(
-                    f"Can only handle version 2 trajectory files. {paths[0]}: {line}"
-                )
-            metadata = json.loads(" ".join(tmp[3:]))
-
-            data = pandas.read_csv(
-                fd,
-                sep=" ",
-                header=0,
-                comment="!",
-                usecols=control_properties,
-                index_col=None,
-            )
-
+        metadata, columns = read_trajectory(paths[0])
         dt = Q_(metadata["dt"], metadata["tunits"])
-        data = data.reset_index(drop=True)
-        data.index *= dt.m_as("fs")
 
-        Jx = data["Jx"].to_numpy()
-        Jy = data["Jy"].to_numpy()
-        Jz = data["Jz"].to_numpy()
+        Jx = columns["Jx"]
+        Jy = columns["Jy"]
+        Jz = columns["Jz"]
 
         J = np.stack((Jx, Jy, Jz))
 
@@ -898,12 +859,12 @@ class ThermalConductivity(seamm.Node):
 
         # Create the Helfand moments
         constants = Jsq * V * dt**2 / (2 * k_B * T**2)
-        M = create_helfand_moments(J, m=m) * constants.m_as("W/m/K*ps")
+        M = collective_helfand_moments(J, m=m) * constants.m_as("W/m/K*ps")
         self.Ms.append(M)
 
         # And correlation functions for Green-Kubo method
         constants = V / (k_B * T**2) * Jsq * dt
-        Jcf, integral = create_correlation_functions(J, m=m)
+        Jcf, integral = tensor_correlation_functions(J, m=m)
         self.Jcfs.append(Jcf)
         self.GK_integrals.append(integral * constants.m_as("W/m/K"))
         # Merge the results and get the averages and errors

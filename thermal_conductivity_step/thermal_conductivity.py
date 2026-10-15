@@ -5,26 +5,28 @@
 import importlib
 import json
 import logging
-from math import log10, ceil
 from pathlib import Path
 import sys
 import traceback
 
 import numpy as np
-import pandas
-from tabulate import tabulate
-
-from .analysis import (
-    create_correlation_functions,
-    create_helfand_moments,
+from seamm_md_analysis import (
+    collective_helfand_moments,
     fit_green_kubo_integral,
     fit_helfand_moment,
-    get_helfand_slope,
+    helfand_slope,
+    read_trajectory,
+    tensor_correlation_functions,
+)
+import seamm_md_analysis.stats
+from seamm_md_analysis.plots import (
     plot_correlation_functions,
     plot_GK_integrals,
     plot_helfand_moments,
     plot_helfand_slopes,
 )
+from tabulate import tabulate
+
 from .thermal_conductivity_parameters import ThermalConductivityParameters
 import thermal_conductivity_step
 import molsystem
@@ -54,24 +56,10 @@ if path.exists():
 
 
 def fmt_err(value, err, precision=2):
-    try:
-        decimals = -ceil(log10(err)) + precision
-    except Exception:
-        e = "--"
-        try:
-            v = f"{value:.2f}"
-        except Exception:
-            v = value
-    else:
-        if decimals < 0:
-            decimals = 0
-        fmt = f".{decimals}f"
-        e = f"{err:{fmt}}"
-        try:
-            v = f"{value:{fmt}}"
-        except Exception:
-            v = value
-    return v, e
+    """Format a value and its error, with 2 decimals when the error is unusable."""
+    return seamm_md_analysis.stats.fmt_err(
+        value, err, precision=precision, fallback_decimals=2
+    )
 
 
 class ThermalConductivity(seamm.Node):
@@ -438,6 +426,25 @@ class ThermalConductivity(seamm.Node):
                 "Units": [],
             }
 
+        # The errors of the fits to the averaged curves treat strongly correlated
+        # points as independent, so they are far too small. Instead the error of
+        # each value is the standard error of the values fitted to each run. With
+        # a single run there is none.
+        def stderr_over_runs(fit_one, runs):
+            values = []
+            for run_data in runs:
+                try:
+                    values.append(fit_one(run_data))
+                except Exception:
+                    pass
+            values = np.array([v for v in values if np.isfinite(v)])
+            if values.size < 2:
+                return None
+            return float(np.std(values, ddof=1) / np.sqrt(values.size))
+
+        def fmt_95(value, stderr):
+            return fmt_err(value, None if stderr is None else 2 * stderr)
+
         dt = Q_(self.timestep[0], "fs")
         ts = np.arange(self.M.shape[1]) * dt.m_as("ps")  # Scale to ps
         ts = ts.tolist()
@@ -448,7 +455,7 @@ class ThermalConductivity(seamm.Node):
         errs = []
         fit0 = []
         for i in range(6):
-            slope, x, err = get_helfand_slope(self.M[i], ts, sigma=self.M_err[i])
+            slope, x, err = helfand_slope(self.M[i], ts, sigma=self.M_err[i])
             slopes.append(slope)
             xs.append(x)
             errs.append(err)
@@ -456,7 +463,7 @@ class ThermalConductivity(seamm.Node):
             if i < 3:
                 (
                     kappa,
-                    kappa_err,
+                    fit_err,
                     a,
                     a_err,
                     tau,
@@ -464,10 +471,16 @@ class ThermalConductivity(seamm.Node):
                     tf,
                     yf,
                 ) = fit_green_kubo_integral(slope, x, sigma=err)
+                kappa_err = stderr_over_runs(
+                    lambda M: fit_green_kubo_integral(
+                        *helfand_slope(M[i], ts, np.zeros(len(ts)))[:2]
+                    ).value,
+                    self.Ms,
+                )
                 fit0.append(
                     {
                         "kappa": kappa,
-                        "stderr": kappa_err,
+                        "stderr": fit_err if kappa_err is None else kappa_err,
                         "xs": tf,
                         "ys": yf,
                         "a": a,
@@ -476,7 +489,7 @@ class ThermalConductivity(seamm.Node):
                         "tau_err": tau_err,
                     }
                 )
-                v, e = fmt_err(kappa, 2 * kappa_err)
+                v, e = fmt_95(kappa, kappa_err)
                 if style == "1-line":
                     if i == 0:
                         table["Run"].append(len(self.V))
@@ -547,6 +560,12 @@ class ThermalConductivity(seamm.Node):
                 slope, err, xs, ys = fit_helfand_moment(
                     self.M[i], ts, sigma=self.M_err[i], start=start, logger=self.logger
                 )
+                kappa_err = stderr_over_runs(
+                    lambda M: fit_helfand_moment(M[i], ts, start=start).slope,
+                    self.Ms,
+                )
+                if kappa_err is not None:
+                    err = kappa_err
                 fit.append(
                     {
                         "kappa": slope,
@@ -555,7 +574,7 @@ class ThermalConductivity(seamm.Node):
                         "ys": ys,
                     }
                 )
-                v, e = fmt_err(slope, 2 * err)
+                v, e = fmt_95(slope, kappa_err)
                 if style == "1-line":
                     alpha = self.tensor_labels[i][0]
                     table["K" + alpha].append(v)
@@ -588,13 +607,17 @@ class ThermalConductivity(seamm.Node):
 
         fit = []
         for i in range(3):
-            kappa, kappa_err, a, a_err, tau, tau_err, tf, yf = fit_green_kubo_integral(
+            kappa, fit_err, a, a_err, tau, tau_err, tf, yf = fit_green_kubo_integral(
                 self.GK_integral[i], ts, sigma=self.GK_integral_err[i]
+            )
+            kappa_err = stderr_over_runs(
+                lambda integral: fit_green_kubo_integral(integral[i], ts).value,
+                self.GK_integrals,
             )
             fit.append(
                 {
                     "kappa": kappa,
-                    "stderr": kappa_err,
+                    "stderr": fit_err if kappa_err is None else kappa_err,
                     "xs": tf,
                     "ys": yf,
                     "a": a,
@@ -603,7 +626,7 @@ class ThermalConductivity(seamm.Node):
                     "tau_err": tau_err,
                 }
             )
-            v, e = fmt_err(kappa, 2 * kappa_err)
+            v, e = fmt_95(kappa, kappa_err)
 
             if style == "1-line":
                 if i == 0:
@@ -832,39 +855,12 @@ class ThermalConductivity(seamm.Node):
             )
 
         # Process the trajectory data
-        control_properties = lambda x: x not in ["tstep"]  # noqa: E731
-        with paths[0].open() as fd:
-            # Get the initial header line and check
-            line = fd.readline()
-            tmp = line.split()
-            if len(tmp) < 3:
-                raise RuntimeError(f"Bad header for {paths[0]}: {line}")
-            if tmp[0] != "!MolSSI":
-                raise RuntimeError(f"Not a MolSSI file? {paths[0]}: {line}")
-            if tmp[1] != "trajectory":
-                raise RuntimeError(f"Not a trajectory file? {paths[0]}: {line}")
-            if tmp[2][0] != "2":
-                raise RuntimeError(
-                    f"Can only handle version 2 trajectory files. {paths[0]}: {line}"
-                )
-            metadata = json.loads(" ".join(tmp[3:]))
-
-            data = pandas.read_csv(
-                fd,
-                sep=" ",
-                header=0,
-                comment="!",
-                usecols=control_properties,
-                index_col=None,
-            )
-
+        metadata, columns = read_trajectory(paths[0])
         dt = Q_(metadata["dt"], metadata["tunits"])
-        data = data.reset_index(drop=True)
-        data.index *= dt.m_as("fs")
 
-        Jx = data["Jx"].to_numpy()
-        Jy = data["Jy"].to_numpy()
-        Jz = data["Jz"].to_numpy()
+        Jx = columns["Jx"]
+        Jy = columns["Jy"]
+        Jz = columns["Jz"]
 
         J = np.stack((Jx, Jy, Jz))
 
@@ -898,12 +894,12 @@ class ThermalConductivity(seamm.Node):
 
         # Create the Helfand moments
         constants = Jsq * V * dt**2 / (2 * k_B * T**2)
-        M = create_helfand_moments(J, m=m) * constants.m_as("W/m/K*ps")
+        M = collective_helfand_moments(J, m=m) * constants.m_as("W/m/K*ps")
         self.Ms.append(M)
 
         # And correlation functions for Green-Kubo method
         constants = V / (k_B * T**2) * Jsq * dt
-        Jcf, integral = create_correlation_functions(J, m=m)
+        Jcf, integral = tensor_correlation_functions(J, m=m)
         self.Jcfs.append(Jcf)
         self.GK_integrals.append(integral * constants.m_as("W/m/K"))
         # Merge the results and get the averages and errors

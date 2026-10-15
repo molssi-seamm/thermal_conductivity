@@ -426,6 +426,25 @@ class ThermalConductivity(seamm.Node):
                 "Units": [],
             }
 
+        # The errors of the fits to the averaged curves treat strongly correlated
+        # points as independent, so they are far too small. Instead the error of
+        # each value is the standard error of the values fitted to each run. With
+        # a single run there is none.
+        def stderr_over_runs(fit_one, runs):
+            values = []
+            for run_data in runs:
+                try:
+                    values.append(fit_one(run_data))
+                except Exception:
+                    pass
+            values = np.array([v for v in values if np.isfinite(v)])
+            if values.size < 2:
+                return None
+            return float(np.std(values, ddof=1) / np.sqrt(values.size))
+
+        def fmt_95(value, stderr):
+            return fmt_err(value, None if stderr is None else 2 * stderr)
+
         dt = Q_(self.timestep[0], "fs")
         ts = np.arange(self.M.shape[1]) * dt.m_as("ps")  # Scale to ps
         ts = ts.tolist()
@@ -444,7 +463,7 @@ class ThermalConductivity(seamm.Node):
             if i < 3:
                 (
                     kappa,
-                    kappa_err,
+                    fit_err,
                     a,
                     a_err,
                     tau,
@@ -452,10 +471,16 @@ class ThermalConductivity(seamm.Node):
                     tf,
                     yf,
                 ) = fit_green_kubo_integral(slope, x, sigma=err)
+                kappa_err = stderr_over_runs(
+                    lambda M: fit_green_kubo_integral(
+                        *helfand_slope(M[i], ts, np.zeros(len(ts)))[:2]
+                    ).value,
+                    self.Ms,
+                )
                 fit0.append(
                     {
                         "kappa": kappa,
-                        "stderr": kappa_err,
+                        "stderr": fit_err if kappa_err is None else kappa_err,
                         "xs": tf,
                         "ys": yf,
                         "a": a,
@@ -464,7 +489,7 @@ class ThermalConductivity(seamm.Node):
                         "tau_err": tau_err,
                     }
                 )
-                v, e = fmt_err(kappa, 2 * kappa_err)
+                v, e = fmt_95(kappa, kappa_err)
                 if style == "1-line":
                     if i == 0:
                         table["Run"].append(len(self.V))
@@ -535,6 +560,12 @@ class ThermalConductivity(seamm.Node):
                 slope, err, xs, ys = fit_helfand_moment(
                     self.M[i], ts, sigma=self.M_err[i], start=start, logger=self.logger
                 )
+                kappa_err = stderr_over_runs(
+                    lambda M: fit_helfand_moment(M[i], ts, start=start).slope,
+                    self.Ms,
+                )
+                if kappa_err is not None:
+                    err = kappa_err
                 fit.append(
                     {
                         "kappa": slope,
@@ -543,7 +574,7 @@ class ThermalConductivity(seamm.Node):
                         "ys": ys,
                     }
                 )
-                v, e = fmt_err(slope, 2 * err)
+                v, e = fmt_95(slope, kappa_err)
                 if style == "1-line":
                     alpha = self.tensor_labels[i][0]
                     table["K" + alpha].append(v)
@@ -576,13 +607,17 @@ class ThermalConductivity(seamm.Node):
 
         fit = []
         for i in range(3):
-            kappa, kappa_err, a, a_err, tau, tau_err, tf, yf = fit_green_kubo_integral(
+            kappa, fit_err, a, a_err, tau, tau_err, tf, yf = fit_green_kubo_integral(
                 self.GK_integral[i], ts, sigma=self.GK_integral_err[i]
+            )
+            kappa_err = stderr_over_runs(
+                lambda integral: fit_green_kubo_integral(integral[i], ts).value,
+                self.GK_integrals,
             )
             fit.append(
                 {
                     "kappa": kappa,
-                    "stderr": kappa_err,
+                    "stderr": fit_err if kappa_err is None else kappa_err,
                     "xs": tf,
                     "ys": yf,
                     "a": a,
@@ -591,7 +626,7 @@ class ThermalConductivity(seamm.Node):
                     "tau_err": tau_err,
                 }
             )
-            v, e = fmt_err(kappa, 2 * kappa_err)
+            v, e = fmt_95(kappa, kappa_err)
 
             if style == "1-line":
                 if i == 0:

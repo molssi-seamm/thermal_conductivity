@@ -6,6 +6,10 @@ History
       LAMMPS step now writes, and from the older text files for runs made before.
     * Stops before running any MD if the system is not periodic, since the heat flux is
       divided by the volume of the cell.
+    * The temperature is now averaged over the same samples as the heat flux, the whole
+      run. It was averaged only after the equilibration detected in the run, while the
+      heat flux was used whole. The thermal conductivity changes very little, e.g. by
+      0.05% for liquid argon.
     * Bugfix: a run whose temperature and volume were missing stopped with an obscure
       error; the message now says what is missing. The sampling interval was taken to be
       in fs even when the file gave it in ps.

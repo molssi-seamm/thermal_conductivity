@@ -24,7 +24,7 @@ History
       Diffusivity step, instead of its own copy. The Helfand moments are computed much
       faster (by FFT): for a million samples, 0.4 s instead of about 2 minutes.
     * Thermal conductivities from the LAMMPS Heat Flux sub-step need lammps-step
-      2026.10.14.2 or later: earlier versions computed the heat flux wrongly.
+      2026.10.15 or later: earlier versions computed the heat flux wrongly.
     * The step no longer needs pandas or statsmodels, and its tests run with uv in CI
       using the package's declared dependencies.
 

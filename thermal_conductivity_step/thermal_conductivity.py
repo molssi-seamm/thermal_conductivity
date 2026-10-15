@@ -20,6 +20,13 @@ from seamm_md_analysis import (
     tensor_correlation_functions,
 )
 import seamm_md_analysis.stats
+from seamm_md_analysis.requirements import Need, Requirements
+from seamm_md_analysis.step_support import (
+    check_md_flowchart,
+    md_inputs,
+    request_sampling,
+    run_own_md,
+)
 from seamm_md_analysis.plots import (
     plot_correlation_functions,
     plot_GK_integrals,
@@ -221,11 +228,20 @@ class ThermalConductivity(seamm.Node):
         if P is None:
             P = self.parameters.values_to_dict()
 
-        text = (
-            f"Calculate the thermal conductivity at {P['T']} using "
-            f"the {P['approach']} approach. {P['nruns']} runs will be averaged for "
-            "the final results.\n\n"
-        )
+        source = P.get("md source", run_own_md)
+        if source == run_own_md:
+            text = (
+                f"Calculate the thermal conductivity at {P['T']} using "
+                f"the {P['approach']} approach. {P['nruns']} runs will be averaged "
+                "for the final results.\n\n"
+            )
+        else:
+            text = "Calculate the thermal conductivity by the Green-Kubo approach from "
+            if source == "files":
+                text += f"the MD in {P['md files']}.\n\n"
+            else:
+                text += f"{source} earlier in the flowchart.\n\n"
+            short = True
         if not short:
             # The subflowchart
             self.subflowchart.root_directory = self.flowchart.root_directory
@@ -283,8 +299,9 @@ class ThermalConductivity(seamm.Node):
         # Print what we are doing
         printer.important(__(self.description_text(P, short=True), indent=self.indent))
 
+        own_md = P["md source"] == run_own_md
         _, configuration = self.get_system_configuration()
-        if configuration is not None and configuration.periodicity != 3:
+        if own_md and configuration is not None and configuration.periodicity != 3:
             raise RuntimeError(
                 "The Thermal Conductivity step needs a periodic system: the heat "
                 "flux is divided by the volume of the periodic cell."
@@ -293,6 +310,8 @@ class ThermalConductivity(seamm.Node):
         # Find the handler for job.out and set the level up
         job_handler = None
         out_handler = None
+        job_level = None
+        out_level = None
         for handler in job.handlers:
             if (
                 isinstance(handler, logging.FileHandler)
@@ -305,6 +324,22 @@ class ThermalConductivity(seamm.Node):
                 out_handler = handler
                 out_level = out_handler.level
                 out_handler.setLevel(printing.JOB)
+
+        if not own_md:
+            self._analyze_earlier_md(
+                P, (job_handler, job_level, out_handler, out_level)
+            )
+            return next_node
+
+        # Turn on any sampling the analysis needs but the MD lacks
+        changes, missing = request_sampling(self.subflowchart, self.md_requirements())
+        for change in changes:
+            printer.job(__(f"Note: {change}.", indent=self.indent + 4 * " "))
+        if len(missing) > 0:
+            raise RuntimeError(
+                "The MD in the sub-flowchart cannot provide what is needed: "
+                + " ".join(missing)
+            )
 
         # Get the first real node
         first_node = self.subflowchart.get_node("1").next()
@@ -597,6 +632,16 @@ class ThermalConductivity(seamm.Node):
             except Exception as e:
                 logger.warning("The fit of the Helfand moments failed. Continuing...")
                 logger.warning(e)
+                if style == "full" and i == 0:
+                    printer.normal(
+                        __(
+                            "Note: the Helfand moments could not be fitted. The fit "
+                            f"starts at {start:.2f} ps, but the moments extend only "
+                            f"to {ts[-1]:.2f} ps, a tenth of the length of each run "
+                            "(or block). Use longer runs, or fewer blocks.",
+                            indent=8 * " ",
+                        )
+                    )
 
         self.plot_helfand_moment(self.M, ts, M_err=self.M_err, fit=fit)
 
@@ -841,17 +886,22 @@ class ThermalConductivity(seamm.Node):
             figure.template = "line.html_template"
             figure.dump(path)
 
-    def process_run(self, run, run_dir):
+    def process_run(self, run, run_dir, data=None):
         """Get the heat fluxes from the run and do initial processing.
 
         Parameters
         ----------
         run : int
             The run number
-        run_dir : pathlib.Path
-            The toplevel directory of the run.
+        run_dir : pathlib.Path or None
+            The toplevel directory of the run, or None if `data` is given.
+        data : (numpy.ndarray, pint.Quantity, float, float) = None
+            The heat flux (3 × n, W/m^2), the sampling interval, the temperature (K)
+            and the volume (Å^3), already read, e.g. from earlier in the flowchart.
         """
-        result = self._read_h5md(run, run_dir)
+        result = data
+        if result is None:
+            result = self._read_h5md(run, run_dir)
         if result is None:
             result = self._read_legacy(run, run_dir)
         J, dt, T, V = result
@@ -890,7 +940,116 @@ class ThermalConductivity(seamm.Node):
         self.GK_integral = np.average(tmp, axis=0)
         self.GK_integral_err = np.std(tmp, axis=0)
 
-    def _read_h5md(self, run, run_dir):
+    def md_requirements(self, P=None):
+        """What the analysis needs from the MD: the heat flux every two steps."""
+        return Requirements(
+            needs=[
+                Need(
+                    "heat_flux",
+                    max_steps=2,
+                    why="the thermal conductivity, to follow its fastest oscillations",
+                )
+            ],
+            periodic=True,
+        )
+
+    def _static(self, key):
+        """A parameter's value without evaluating variables, or None."""
+        parameter = self.parameters[key]
+        if parameter.is_expr:
+            return None
+        return parameter.get()
+
+    def check_flowchart(self, preceding):
+        """Check, before the job runs, that the MD will sample what is needed.
+
+        Parameters
+        ----------
+        preceding : [seamm.Node]
+            The steps that run before this one.
+
+        Returns
+        -------
+        [str]
+            A description of each problem; empty if none.
+        """
+        source = self._static("md source")
+        if source is None:
+            return []
+        return check_md_flowchart(self, preceding, self.md_requirements(), source)
+
+    def check_configuration(self, configuration):
+        """Called by an MD step before it runs MD that this step will analyze.
+
+        Raises
+        ------
+        RuntimeError
+            If the system is not periodic.
+        """
+        if self._static("md source") == run_own_md:
+            return
+        if configuration.periodicity != 3:
+            raise RuntimeError(
+                f"'{self.title}' will analyze the MD, but the system is not "
+                "periodic: the heat flux is divided by the volume of the cell."
+            )
+
+    def _analyze_earlier_md(self, P, handlers):
+        """Analyze MD run earlier in the flowchart, or in other jobs."""
+        job_handler, job_level, out_handler, out_level = handlers
+        paths = md_inputs(self, P, name="heat_flux")
+        runs = [self._read_md_file(path) for path in paths]
+
+        text = f"Analyzing {len(paths)} MD run{'s' if len(paths) > 1 else ''}"
+        if len(runs) == 1:
+            runs = self._split_into_blocks(runs[0], P["number of blocks"])
+            text += f", divided into {len(runs)} blocks to estimate the errors"
+        text += ": " + ", ".join(str(p) for p in paths)
+        printer.job(__(text, indent=self.indent + 4 * " "))
+        printer.job("")
+
+        P["nruns"] = len(runs)
+        for run, data in enumerate(runs, start=1):
+            self.process_run(run, None, data=data)
+            if len(self.V) > 1:
+                if job_handler is not None:
+                    job_handler.setLevel(job_level)
+                if out_handler is not None:
+                    out_handler.setLevel(out_level)
+                self.analyze(P=P, style="1-line", run=run)
+                if job_handler is not None:
+                    job_handler.setLevel(printing.JOB)
+                if out_handler is not None:
+                    out_handler.setLevel(printing.JOB)
+
+        if job_handler is not None:
+            job_handler.setLevel(job_level)
+        if out_handler is not None:
+            out_handler.setLevel(out_level)
+        self.analyze(P=P, style="full")
+
+    def _read_md_file(self, path):
+        """The heat flux, interval, temperature and volume of one md.h5md."""
+        result = self._read_h5md(None, None, paths=[path])
+        if result is None:
+            raise RuntimeError(f"There is no heat flux in {path}.")
+        return result
+
+    @staticmethod
+    def _split_into_blocks(data, n_blocks):
+        """Divide one run into consecutive blocks, analyzed as separate runs."""
+        J, dt, T, V = data
+        n_blocks = max(1, int(n_blocks))
+        n = J.shape[1] // n_blocks
+        if n < 2000:
+            raise RuntimeError(
+                f"The run has only {J.shape[1]} samples of the heat flux, too few for "
+                f"{n_blocks} blocks: each block needs at least 2000 for the "
+                "correlation functions to be fitted. Use fewer blocks or a longer run."
+            )
+        return [(J[:, i * n : (i + 1) * n], dt, T, V) for i in range(n_blocks)]
+
+    def _read_h5md(self, run, run_dir, paths=None):
         """The heat flux, temperature and volume from md.h5md, if any.
 
         Returns
@@ -900,11 +1059,12 @@ class ThermalConductivity(seamm.Node):
             temperature in K and the mean volume in Å^3; or None if no md.h5md in
             the run has the heat flux, so the older files must be read.
         """
-        paths = []
-        for path in sorted(run_dir.glob("**/md.h5md")):
-            with open_md(path) as md:
-                if md.has_observable("heat_flux"):
-                    paths.append(path)
+        if paths is None:
+            paths = []
+            for path in sorted(run_dir.glob("**/md.h5md")):
+                with open_md(path) as md:
+                    if md.has_observable("heat_flux"):
+                        paths.append(path)
         if len(paths) == 0:
             return None
         if len(paths) > 1:
@@ -914,7 +1074,7 @@ class ThermalConductivity(seamm.Node):
         with open_md(paths[0]) as md:
             if not md.periodic:
                 raise RuntimeError(
-                    f"The MD of run {run} is not periodic, so it has no thermal "
+                    f"The MD in {paths[0]} is not periodic, so it has no thermal "
                     "conductivity."
                 )
             flux = md.observable("heat_flux", units="W/m^2", time_units="fs")

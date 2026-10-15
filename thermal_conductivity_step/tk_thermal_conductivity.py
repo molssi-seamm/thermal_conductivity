@@ -7,6 +7,7 @@ import tkinter as tk
 import tkinter.ttk as ttk
 
 from .thermal_conductivity_parameters import ThermalConductivityParameters
+from seamm_md_analysis.step_support import read_files, run_own_md
 import seamm
 from seamm_util import ureg, Q_, units_class  # noqa: F401
 import seamm_widgets as sw
@@ -156,9 +157,10 @@ class TkThermalConductivity(seamm.TkNode):
             self[key] = P[key].widget(frame)
 
         # and binding to change as needed
-        self["approach"].combobox.bind(
-            "<<ComboboxSelected>>", self.reset_conductivity_frame
-        )
+        for key in ("md source", "approach"):
+            self[key].combobox.bind(
+                "<<ComboboxSelected>>", self.reset_conductivity_frame
+            )
 
         # and lay them out
         self.reset_dialog()
@@ -199,7 +201,16 @@ class TkThermalConductivity(seamm.TkNode):
         """Layout the widgets in the conductivity frame
         as needed for the current state"""
 
-        approach = self["approach"].get()
+        source = self["md source"].get()
+        own_md = source == run_own_md
+        approach = self["approach"].get() if own_md else "Green-Kubo"
+
+        # The sub-flowchart is used only when this step runs its own MD
+        notebook = self["notebook"]
+        if own_md:
+            notebook.add(self["flowchart frame"])
+        else:
+            notebook.hide(self["flowchart frame"])
 
         frame = self["conductivity_frame"]
         for slave in frame.grid_slaves():
@@ -207,9 +218,16 @@ class TkThermalConductivity(seamm.TkNode):
 
         row = 0
 
-        # Main controls
+        # Main controls. MD from elsewhere is analyzed by the Green-Kubo approach,
+        # at its own temperature.
         widgets = []
-        for key in ("approach", "T", "nruns", "errors"):
+        if own_md:
+            keys = ("md source", "approach", "T", "nruns", "errors")
+        elif source == read_files:
+            keys = ("md source", "md files", "number of blocks")
+        else:
+            keys = ("md source", "number of blocks")
+        for key in keys:
             self[key].grid(row=row, column=0, columnspan=2, sticky=tk.W)
             widgets.append(self[key])
             row += 1

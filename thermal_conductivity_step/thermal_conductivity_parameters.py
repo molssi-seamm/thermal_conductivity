@@ -3,6 +3,7 @@
 Control parameters for the Thermal Conductivity step in a SEAMM flowchart
 """
 
+from seamm_md_analysis.step_support import run_own_md, source_parameters
 import logging
 
 import seamm
@@ -75,6 +76,7 @@ class ThermalConductivityParameters(seamm.Parameters):
     """
 
     parameters = {
+        **source_parameters("the thermal conductivity"),
         "approach": {
             "default": "Green-Kubo",
             "kind": "enum",
@@ -87,6 +89,7 @@ class ThermalConductivityParameters(seamm.Parameters):
             ),
             "format_string": "",
             "description": "Approach:",
+            "applies_when": {"md source": run_own_md},
             "help_text": (
                 "The approach or method for determining the thermal conductivity."
             ),
@@ -98,6 +101,7 @@ class ThermalConductivityParameters(seamm.Parameters):
             "format_string": ".2f",
             "description": "Temperature:",
             "help_text": "The temperature for the thermal conductivity calculation.",
+            "applies_when": {"md source": run_own_md},
         },
         "nruns": {
             "default": "20",
@@ -107,6 +111,7 @@ class ThermalConductivityParameters(seamm.Parameters):
             "format_string": "",
             "description": "Number of runs to average:",
             "help_text": "The number for separate runs to average.",
+            "applies_when": {"md source": run_own_md},
         },
         "errors": {
             "default": "continue to next run",
@@ -120,6 +125,7 @@ class ThermalConductivityParameters(seamm.Parameters):
             "format_string": "s",
             "description": "On errors",
             "help_text": "How to handle errors in the runs",
+            "applies_when": {"md source": run_own_md},
         },
         "ehex": {
             "default": "yes",

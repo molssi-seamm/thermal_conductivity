@@ -1,7 +1,7 @@
 =======
 History
 =======
-2026.10.14 -- Bugfix: crash with coarse sampling; unreliable fits
+2026.10.15 -- Bugfix: crash with coarse sampling; unreliable fits
     * The Green–Kubo fit failed when the heat flux was sampled less often than every
       0.4 ps. It no longer fails.
     * The Green–Kubo fit could accept a second exponential with a negative amplitude,

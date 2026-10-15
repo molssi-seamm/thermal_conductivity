@@ -1,6 +1,19 @@
 =======
 History
 =======
+2026.10.15.1 -- Reads the H5MD files; needs a periodic system
+    * Reads the heat flux, temperature and volume from the ``md.h5md`` files that the
+      LAMMPS step now writes, and from the older text files for runs made before.
+    * Stops before running any MD if the system is not periodic, since the heat flux is
+      divided by the volume of the cell.
+    * The temperature is now averaged over the same samples as the heat flux, the whole
+      run. It was averaged only after the equilibration detected in the run, while the
+      heat flux was used whole. The thermal conductivity changes very little, e.g. by
+      0.05% for liquid argon.
+    * Bugfix: a run whose temperature and volume were missing stopped with an obscure
+      error; the message now says what is missing. The sampling interval was taken to be
+      in fs even when the file gave it in ps.
+
 2026.10.15 -- Bugfix: crash with coarse sampling; unreliable fits
     * The Green–Kubo fit failed when the heat flux was sampled less often than every
       0.4 ps. It no longer fails.

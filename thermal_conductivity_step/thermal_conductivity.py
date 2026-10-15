@@ -15,6 +15,7 @@ from seamm_md_analysis import (
     fit_green_kubo_integral,
     fit_helfand_moment,
     helfand_slope,
+    open_md,
     read_trajectory,
     tensor_correlation_functions,
 )
@@ -281,6 +282,13 @@ class ThermalConductivity(seamm.Node):
 
         # Print what we are doing
         printer.important(__(self.description_text(P, short=True), indent=self.indent))
+
+        _, configuration = self.get_system_configuration()
+        if configuration is not None and configuration.periodicity != 3:
+            raise RuntimeError(
+                "The Thermal Conductivity step needs a periodic system: the heat "
+                "flux is divided by the volume of the periodic cell."
+            )
 
         # Find the handler for job.out and set the level up
         job_handler = None
@@ -843,44 +851,13 @@ class ThermalConductivity(seamm.Node):
         run_dir : pathlib.Path
             The toplevel directory of the run.
         """
-        paths = sorted(run_dir.glob("**/heat_flux.trj"))
-
-        if len(paths) == 0:
-            raise RuntimeError(
-                f"There is no heat flux data for run {run} in {run_dir}."
-            )
-        elif len(paths) > 1:
-            raise NotImplementedError(
-                f"Cannot handle multiple HeatFlux files from run {run} in {run_dir}."
-            )
-
-        # Process the trajectory data
-        metadata, columns = read_trajectory(paths[0])
-        dt = Q_(metadata["dt"], metadata["tunits"])
-
-        Jx = columns["Jx"]
-        Jy = columns["Jy"]
-        Jz = columns["Jz"]
-
-        J = np.stack((Jx, Jy, Jz))
-
-        # Get the state function V & T
-        path = paths[0].parent / "state.json"
-        if path.exists():
-            with path.open() as fd:
-                state = json.load(fd)
-            T = state["T"]["mean"]
-            if "V" in state:
-                V = state["V"]["mean"]
-            else:
-                _, configuration = self.get_system_configuration()
-                V = configuration.volume
-            self.V.append(V)
-            self.T.append(T)
-        else:
-            self.V.append(None)
-            self.T.append(None)
-        self.timestep.append(dt.magnitude)
+        result = self._read_h5md(run, run_dir)
+        if result is None:
+            result = self._read_legacy(run, run_dir)
+        J, dt, T, V = result
+        self.V.append(V)
+        self.T.append(T)
+        self.timestep.append(dt.m_as("fs"))
 
         # We need properties like the temperature and volume.
         T = Q_(T, "K")
@@ -912,6 +889,75 @@ class ThermalConductivity(seamm.Node):
         tmp = np.stack(self.GK_integrals)
         self.GK_integral = np.average(tmp, axis=0)
         self.GK_integral_err = np.std(tmp, axis=0)
+
+    def _read_h5md(self, run, run_dir):
+        """The heat flux, temperature and volume from md.h5md, if any.
+
+        Returns
+        -------
+        (numpy.ndarray(3, n), pint.Quantity, float, float) or None
+            The heat flux in W/m^2, the interval between samples, the mean
+            temperature in K and the mean volume in Å^3; or None if no md.h5md in
+            the run has the heat flux, so the older files must be read.
+        """
+        paths = []
+        for path in sorted(run_dir.glob("**/md.h5md")):
+            with open_md(path) as md:
+                if md.has_observable("heat_flux"):
+                    paths.append(path)
+        if len(paths) == 0:
+            return None
+        if len(paths) > 1:
+            raise NotImplementedError(
+                f"Cannot handle the heat flux from more than one MD run in run {run}."
+            )
+        with open_md(paths[0]) as md:
+            if not md.periodic:
+                raise RuntimeError(
+                    f"The MD of run {run} is not periodic, so it has no thermal "
+                    "conductivity."
+                )
+            flux = md.observable("heat_flux", units="W/m^2", time_units="fs")
+            T = float(md.observable("temperature", units="K").values.mean())
+            if md.has_observable("volume"):
+                V = float(md.observable("volume", units="Å^3").values.mean())
+            else:
+                V = float(abs(np.linalg.det(md.cell(units="Å"))))
+        return flux.values.T, flux.dt, T, V
+
+    def _read_legacy(self, run, run_dir):
+        """The heat flux, temperature and volume from older LAMMPS step files."""
+        paths = sorted(run_dir.glob("**/heat_flux.trj"))
+
+        if len(paths) == 0:
+            raise RuntimeError(
+                f"There is no heat flux data for run {run} in {run_dir}."
+            )
+        elif len(paths) > 1:
+            raise NotImplementedError(
+                f"Cannot handle multiple HeatFlux files from run {run} in {run_dir}."
+            )
+
+        # Process the trajectory data
+        metadata, columns = read_trajectory(paths[0])
+        dt = Q_(metadata["dt"], metadata["tunits"])
+        J = np.stack((columns["Jx"], columns["Jy"], columns["Jz"]))
+
+        # Get the state function V & T
+        path = paths[0].parent / "state.json"
+        if not path.exists():
+            raise RuntimeError(
+                f"The temperature and volume of run {run} are missing ({path})."
+            )
+        with path.open() as fd:
+            state = json.load(fd)
+        T = state["T"]["mean"]
+        if "V" in state:
+            V = state["V"]["mean"]
+        else:
+            _, configuration = self.get_system_configuration()
+            V = configuration.volume
+        return J, dt, T, V
 
     def set_id(self, node_id=()):
         """Sequentially number the subnodes"""

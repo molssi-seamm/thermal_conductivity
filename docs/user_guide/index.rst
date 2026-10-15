@@ -31,6 +31,12 @@ interval (twice the standard error), comes from the spread of the values fitted 
 each run separately, so at least two runs are needed for errors, and more runs give
 better ones. With a single run no errors are reported.
 
+The step needs a periodic system, since the heat flux is divided by the volume of the
+cell; it stops before running any MD if the structure is not periodic. It reads the
+heat flux, the temperature and the volume from the ``md.h5md`` file that the LAMMPS
+step writes for each MD run. Runs made with older versions of the LAMMPS step, which
+have no ``md.h5md``, are read from their text files as before.
+
 ..
     <remove the dots above and this line and unindent the toctree to expose it>
     Contents:

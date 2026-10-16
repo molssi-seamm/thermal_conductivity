@@ -1,7 +1,7 @@
 =======
 History
 =======
-2026.10.15.3 -- Bugfix: a short run stopped the analysis with an error
+2026.10.16 -- Bugfix: a short run stopped the analysis with an error
     * A run, or block of a run, shorter than about 10 ps stopped the analysis with an
       IndexError. Each must now be at least 10 ps long, and the step says so.
 

@@ -1,6 +1,10 @@
 =======
 History
 =======
+2026.10.16 -- Bugfix: a short run stopped the analysis with an error
+    * A run, or block of a run, shorter than about 10 ps stopped the analysis with an
+      IndexError. Each must now be at least 10 ps long, and the step says so.
+
 2026.10.15.2 -- Analyze MD run earlier in the flowchart
     * New "MD to analyze" choice: run the MD in the sub-flowchart (as before), the last
       MD run earlier in the flowchart, the last MD run of each loop iteration, or

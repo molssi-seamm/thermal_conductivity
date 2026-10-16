@@ -53,6 +53,10 @@ from seamm_util.printing import FormattedText as __
 # directory, and is used for all normal output from this step.
 
 logger = logging.getLogger(__name__)
+
+#: The shortest run, or block of a run, that can be analyzed: the correlation
+#: functions are kept to a tenth of it, and fitting them needs a little over 0.8 ps.
+MIN_RUN_TIME = Q_(10.0, "ps")
 job = printing.getPrinter()
 printer = printing.getPrinter("Thermal Conductivity")
 
@@ -918,6 +922,12 @@ class ThermalConductivity(seamm.Node):
         # Limit the lengths of the data
         n = J.shape[1]
         m = min(n // 10, 10000)
+        if n * dt < MIN_RUN_TIME:
+            raise RuntimeError(
+                f"Run {run} is only {(n * dt).to('ps'):~P} long, but at least "
+                f"{MIN_RUN_TIME:~P} is needed for the correlation functions to be "
+                "fitted."
+            )
 
         # Create the Helfand moments
         constants = Jsq * V * dt**2 / (2 * k_B * T**2)
@@ -1041,6 +1051,13 @@ class ThermalConductivity(seamm.Node):
         J, dt, T, V = data
         n_blocks = max(1, int(n_blocks))
         n = J.shape[1] // n_blocks
+        if n * dt < MIN_RUN_TIME:
+            raise RuntimeError(
+                f"The run is only {(J.shape[1] * dt).to('ps'):~P} long, too short for "
+                f"{n_blocks} blocks: each block needs at least {MIN_RUN_TIME:~P} for "
+                "the correlation functions to be fitted. Use fewer blocks or a longer "
+                "run."
+            )
         if n < 2000:
             raise RuntimeError(
                 f"The run has only {J.shape[1]} samples of the heat flux, too few for "

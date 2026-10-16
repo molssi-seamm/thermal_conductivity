@@ -60,7 +60,7 @@ files
 
 A single run is divided into **Blocks for errors from one run** (5 by default),
 analyzed separately to estimate the errors; each block must be much longer than the
-correlation time. Before the job runs, the step checks that the MD before it samples
+correlation time, and at least 10 ps long, as must each run. Before the job runs, the step checks that the MD before it samples
 what it needs, and the job does not start if it does not.
 
 The step needs the heat flux sampled every two timesteps, as the Heat Flux sub-step of

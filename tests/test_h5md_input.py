@@ -9,6 +9,7 @@ import pytest
 from seamm_md_analysis import H5MDWriter
 
 from thermal_conductivity_step.thermal_conductivity import ThermalConductivity
+from seamm_util import Q_
 
 cell = np.diag([10.0, 20.0, 30.0])
 
@@ -57,13 +58,21 @@ def test_no_h5md_returns_none(tmp_path):
 
 
 def test_blocks_split_one_run():
-    J = np.ones((3, 10000))
-    blocks = ThermalConductivity._split_into_blocks((J, "dt", 300.0, 5000.0), 4)
+    J = np.ones((3, 40000))
+    dt = Q_(2.0, "fs")
+    blocks = ThermalConductivity._split_into_blocks((J, dt, 300.0, 5000.0), 4)
     assert len(blocks) == 4
-    assert all(b[0].shape == (3, 2500) for b in blocks)
+    assert all(b[0].shape == (3, 10000) for b in blocks)
     assert blocks[2][2:] == (300.0, 5000.0)
     with pytest.raises(RuntimeError, match="too few"):
-        ThermalConductivity._split_into_blocks((J, "dt", 300.0, 5000.0), 20)
+        ThermalConductivity._split_into_blocks((J, Q_(10.0, "fs"), 300.0, 5000.0), 25)
+
+
+def test_blocks_too_short():
+    """Each block must be long enough for the Green-Kubo fit, 10 ps."""
+    J = np.ones((3, 10000))
+    with pytest.raises(RuntimeError, match="too short"):
+        ThermalConductivity._split_into_blocks((J, Q_(2.0, "fs"), 300.0, 5000.0), 4)
 
 
 def test_requirements():

@@ -1,4 +1,4 @@
 numpy
-seamm
-seamm-md-analysis>=2026.10.16
+seamm>=2026.10.17.1
+seamm-md-analysis>=2026.10.17.4
 tabulate

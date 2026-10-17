@@ -2,6 +2,8 @@
 
 """This file contains metadata describing the results from ThermalConductivity"""
 
+from seamm_md_analysis.step_support import state_results
+
 metadata = {}
 
 """Description of the computational models for ThermalConductivity.
@@ -130,16 +132,60 @@ type : str
 units : str
     Optional units for the result. If present, the value should be in these units.
 """
-# metadata["results"] = {
-#     "total_energy": {
-#         "calculation": [
-#             "energy",
-#             "optimization",
-#         ],
-#         "description": "The total energy",
-#         "dimensionality": "scalar",
-#         "property": "total energy#ThermalConductivity#{model}",
-#         "type": "float",
-#         "units": "E_h",
-#     },
-# }
+
+
+def _kappa(description, method=None, stderr=False):
+    """A result for the thermal conductivity, or its standard error."""
+    result = {
+        "description": (
+            f"The standard error of {description}"
+            if stderr
+            else description[0].upper() + description[1:]
+        ),
+        "dimensionality": "scalar",
+        "type": "float",
+        "units": "W/m/K",
+    }
+    if method is not None:
+        what = "thermal conductivity,stderr" if stderr else "thermal conductivity"
+        result["property"] = f"{what}#{method}#{{model}}"
+    return result
+
+
+metadata["results"] = {
+    "kappa": _kappa("the thermal conductivity by Green-Kubo", "Green-Kubo"),
+    "kappa,stderr": _kappa(
+        "the thermal conductivity by Green-Kubo", "Green-Kubo", stderr=True
+    ),
+    "kappa (Helfand)": _kappa(
+        "the thermal conductivity from the Helfand moments", "Helfand"
+    ),
+    "kappa (Helfand),stderr": _kappa(
+        "the thermal conductivity from the Helfand moments", "Helfand", stderr=True
+    ),
+    "kappa (Helfand derivative)": _kappa(
+        "the thermal conductivity from the derivative of the Helfand moments"
+    ),
+    "kappa (Helfand derivative),stderr": _kappa(
+        "the thermal conductivity from the derivative of the Helfand moments",
+        stderr=True,
+    ),
+    "kappa_xx": _kappa("the xx component of the thermal conductivity, by Green-Kubo"),
+    "kappa_xx,stderr": _kappa(
+        "the xx component of the thermal conductivity, by Green-Kubo", stderr=True
+    ),
+    "kappa_yy": _kappa("the yy component of the thermal conductivity, by Green-Kubo"),
+    "kappa_yy,stderr": _kappa(
+        "the yy component of the thermal conductivity, by Green-Kubo", stderr=True
+    ),
+    "kappa_zz": _kappa("the zz component of the thermal conductivity, by Green-Kubo"),
+    "kappa_zz,stderr": _kappa(
+        "the zz component of the thermal conductivity, by Green-Kubo", stderr=True
+    ),
+    **state_results,
+    "nruns": {
+        "description": "The number of MD runs analyzed",
+        "dimensionality": "scalar",
+        "type": "integer",
+    },
+}

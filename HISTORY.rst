@@ -1,6 +1,27 @@
 =======
 History
 =======
+2026.10.17 -- Analyze MD run before the step; one isotropic κ with labelled errors
+    * The step analyzes MD run before it in the flowchart -- the runs of a Loop around
+      the MD, as independent replicas ("the last MD run of each loop iteration", the
+      default) -- or md.h5md files; it no longer runs its own MD in a sub-flowchart.
+      Older flowcharts that stored its settings for that can still be read; the check
+      before the job runs says what replaces them.
+    * The check before the job runs also warns when the analysis is inside the loop
+      holding its MD, when the loop changes the temperature or pressure, and when the
+      thermostat does not suit the analysis, with fixes; the step warns before the MD
+      when the system is small.
+    * Errors are the 95% confidence interval, Student's t for the number of runs or
+      blocks, and the output says so; stored errors are standard errors.
+    * The state of the runs -- temperature, pressure, volume and density with their
+      errors, and the equilibrium density where an NPT run before them gives the bulk
+      modulus -- is reported and stored. The values of each run or block are in
+      step.out.
+    * κ is the average of the three diagonal components within each run, with a check
+      that they agree and that the off-diagonal terms are zero; κ and its components
+      are stored as results.
+    * Bugfix: in a loop, the step kept the data of earlier iterations.
+
 2026.10.16 -- Bugfix: a short run stopped the analysis with an error
     * A run, or block of a run, shorter than about 10 ps stopped the analysis with an
       IndexError. Each must now be at least 10 ps long, and the step says so.

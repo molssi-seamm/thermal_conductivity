@@ -30,8 +30,7 @@ def write(path, periodic=True, volume=False):
 
 def test_reads_flux_temperature_and_cell_volume(tmp_path):
     write(tmp_path / "md.h5md")
-    tc = ThermalConductivity.__new__(ThermalConductivity)
-    J, dt, T, V = tc._read_h5md(1, tmp_path)
+    J, dt, T, V = ThermalConductivity._read_h5md(tmp_path / "md.h5md")
     assert J.shape == (3, 50)
     assert np.allclose(J[1], -J[0])
     assert dt.m_as("fs") == pytest.approx(2.0)
@@ -41,20 +40,23 @@ def test_reads_flux_temperature_and_cell_volume(tmp_path):
 
 def test_npt_volume_is_used(tmp_path):
     write(tmp_path / "md.h5md", volume=True)
-    tc = ThermalConductivity.__new__(ThermalConductivity)
-    assert tc._read_h5md(1, tmp_path)[3] == pytest.approx(5000.0)
+    assert ThermalConductivity._read_h5md(tmp_path / "md.h5md")[3] == pytest.approx(
+        5000.0
+    )
 
 
 def test_non_periodic_is_refused(tmp_path):
     write(tmp_path / "md.h5md", periodic=False)
-    tc = ThermalConductivity.__new__(ThermalConductivity)
     with pytest.raises(RuntimeError, match="not periodic"):
-        tc._read_h5md(1, tmp_path)
+        ThermalConductivity._read_h5md(tmp_path / "md.h5md")
 
 
-def test_no_h5md_returns_none(tmp_path):
-    tc = ThermalConductivity.__new__(ThermalConductivity)
-    assert tc._read_h5md(1, tmp_path) is None
+def test_no_heat_flux_returns_none(tmp_path):
+    with H5MDWriter(tmp_path / "md.h5md") as w:
+        w.particles(ids=[1, 2], cell=cell, periodic=True)
+        steps = np.arange(0, 100, 2)
+        w.observable("temperature", steps, steps * 1.0, np.full(50, 300.0), "K")
+    assert ThermalConductivity._read_h5md(tmp_path / "md.h5md") is None
 
 
 def test_blocks_split_one_run():
@@ -77,6 +79,9 @@ def test_blocks_too_short():
 
 def test_requirements():
     tc = ThermalConductivity.__new__(ThermalConductivity)
-    (need,) = tc.md_requirements().needs
+    requirements = tc.md_requirements()
+    (need,) = requirements.needs
     assert need.names == ["heat_flux"]
     assert need.max_steps == 2
+    assert requirements.periodic
+    assert requirements.dynamics

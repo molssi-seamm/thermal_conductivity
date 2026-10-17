@@ -1,1 +1,5 @@
 Property,Type,Units,Description,URL
+thermal conductivity#Green-Kubo#{model},float,W/m/K,"The thermal conductivity by Green-Kubo using {model}",https://en.wikipedia.org/wiki/Thermal_conductivity_and_resistivity
+"thermal conductivity,stderr#Green-Kubo#{model}",float,W/m/K,"The standard error of the thermal conductivity by Green-Kubo using {model}",https://en.wikipedia.org/wiki/Thermal_conductivity_and_resistivity
+thermal conductivity#Helfand#{model},float,W/m/K,"The thermal conductivity from the Helfand moments using {model}",https://en.wikipedia.org/wiki/Thermal_conductivity_and_resistivity
+"thermal conductivity,stderr#Helfand#{model}",float,W/m/K,"The standard error of the thermal conductivity from the Helfand moments using {model}",https://en.wikipedia.org/wiki/Thermal_conductivity_and_resistivity

@@ -3,7 +3,7 @@
 Control parameters for the Thermal Conductivity step in a SEAMM flowchart
 """
 
-from seamm_md_analysis.step_support import run_own_md, source_parameters
+from seamm_md_analysis.step_support import source_parameters
 import logging
 
 import seamm
@@ -15,172 +15,27 @@ class ThermalConductivityParameters(seamm.Parameters):
     """
     The control parameters for Thermal Conductivity.
 
-    You need to replace the "time" entry in dictionary below these comments with the
-    definitions of parameters to control this step. The keys are parameters for the
-    current plugin,the values are dictionaries as outlined below.
-
-    Examples
-    --------
-    ::
-
-        parameters = {
-            "time": {
-                "default": 100.0,
-                "kind": "float",
-                "default_units": "ps",
-                "enumeration": tuple(),
-                "format_string": ".1f",
-                "description": "Simulation time:",
-                "help_text": ("The time to simulate in the dynamics run.")
-            },
-        }
-
-    parameters : {str: {str: str}}
-        A dictionary containing the parameters for the current step.
-        Each key of the dictionary is a dictionary that contains the
-        the following keys:
-
-    parameters["default"] :
-        The default value of the parameter, used to reset it.
-
-    parameters["kind"] : enum()
-        Specifies the kind of a variable. One of  "integer", "float", "string",
-        "boolean", or "enum"
-
-        While the "kind" of a variable might be a numeric value, it may still have
-        enumerated custom values meaningful to the user. For instance, if the parameter
-        is a convergence criterion for an optimizer, custom values like "normal",
-        "precise", etc, might be adequate. In addition, any parameter can be set to a
-        variable of expression, indicated by having "$" as the first character in the
-        field. For example, $OPTIMIZER_CONV.
-
-    parameters["default_units"] : str
-        The default units, used for resetting the value.
-
-    parameters["enumeration"]: tuple
-        A tuple of enumerated values.
-
-    parameters["format_string"]: str
-        A format string for "pretty" output.
-
-    parameters["description"]: str
-        A short string used as a prompt in the GUI.
-
-    parameters["help_text"]: str
-        A longer string to display as help for the user.
-
-    See Also
-    --------
-    ThermalConductivity, TkThermalConductivity, ThermalConductivityParameters,
-    ThermalConductivityStep
+    The MD to analyze is run earlier in the flowchart -- in a Loop for independent
+    runs -- or in other jobs (see seamm_md_analysis.step_support.source_parameters).
+    The thermal conductivity is calculated from the heat flux by the Green-Kubo and
+    Helfand methods.
     """
+
+    # Dropped with the own-MD route (phase 8): ignored in older flowcharts
+    retired = (
+        "nruns",
+        "errors",
+        "approach",
+        "T",
+        "ehex",
+        "nlayers",
+        "deltaT",
+        "swap frequency",
+        "n to swap",
+    )
 
     parameters = {
         **source_parameters("the thermal conductivity"),
-        "approach": {
-            "default": "Green-Kubo",
-            "kind": "enum",
-            "default_units": "",
-            "enumeration": (
-                "Green-Kubo",
-                "Reverse Non-Equilibrium MD (RNEMD)",
-                "Thermostatted Temperature Difference",
-                "Heat Removal / Addition",
-            ),
-            "format_string": "",
-            "description": "Approach:",
-            "applies_when": {"md source": run_own_md},
-            "help_text": (
-                "The approach or method for determining the thermal conductivity."
-            ),
-        },
-        "T": {
-            "default": 298.15,
-            "kind": "float",
-            "default_units": "K",
-            "format_string": ".2f",
-            "description": "Temperature:",
-            "help_text": "The temperature for the thermal conductivity calculation.",
-            "applies_when": {"md source": run_own_md},
-        },
-        "nruns": {
-            "default": "20",
-            "kind": "integer",
-            "default_units": "",
-            "enumeration": tuple(),
-            "format_string": "",
-            "description": "Number of runs to average:",
-            "help_text": "The number for separate runs to average.",
-            "applies_when": {"md source": run_own_md},
-        },
-        "errors": {
-            "default": "continue to next run",
-            "kind": "string",
-            "default_units": "",
-            "enumeration": (
-                "continue to next run",
-                "exit the thermal conductivity step",
-                "stop the job",
-            ),
-            "format_string": "s",
-            "description": "On errors",
-            "help_text": "How to handle errors in the runs",
-            "applies_when": {"md source": run_own_md},
-        },
-        "ehex": {
-            "default": "yes",
-            "kind": "boolean",
-            "default_units": "",
-            "enumeration": ("yes", "no"),
-            "format_string": "",
-            "description": "Use enhanced heat exchange algorithm:",
-            "help_text": (
-                "Whether to use the enhanced algorithm, which conserves energy "
-                " noticeably better than the original algorithm at little extra cost."
-            ),
-        },
-        "nlayers": {
-            "default": "50",
-            "kind": "integer",
-            "default_units": "",
-            "enumeration": tuple(),
-            "format_string": "",
-            "description": "Number of layers:",
-            "help_text": (
-                "How many layers to slice the system into for determining the "
-                "temperature profile."
-            ),
-        },
-        "deltaT": {
-            "default": "20",
-            "kind": "float",
-            "default_units": "K",
-            "enumeration": tuple(),
-            "format_string": ".1f",
-            "description": "Target temperature difference:",
-            "help_text": (
-                "The target difference in temperatures between the hot and cold "
-                "zones."
-            ),
-        },
-        "swap frequency": {
-            "default": "100",
-            "kind": "float",
-            "default_units": "fs",
-            "enumeration": tuple(),
-            "format_string": "",
-            "description": "Momenta swap frequency:",
-            "help_text": "The frequency to swap momenta in the RNEMD approach.",
-        },
-        "n to swap": {
-            "default": "1",
-            "kind": "integer",
-            "default_units": "",
-            "enumeration": tuple(),
-            "format_string": "",
-            "description": "Number of momenta to swap:",
-            "help_text": "The number of momenta to swap in the RNEMD approach.",
-        },
     }
 
     def __init__(self, defaults={}, data=None):

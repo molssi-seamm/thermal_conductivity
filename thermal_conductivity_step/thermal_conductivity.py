@@ -1,31 +1,42 @@
 # -*- coding: utf-8 -*-
 
-"""Non-graphical part of the Thermal Conductivity step in a SEAMM flowchart"""
+"""Non-graphical part of the Thermal Conductivity step in a SEAMM flowchart.
+
+The thermal conductivity is calculated from the fluctuations of the heat flux in
+equilibrium MD, by the Green-Kubo integral of its autocorrelation function and by the
+Helfand moments. The MD is run before this step -- in a Loop for independent runs --
+or read from files; the step analyzes it.
+"""
 
 import importlib
-import json
 import logging
+from math import floor, log10
 from pathlib import Path
-import sys
-import traceback
+import warnings
 
 import numpy as np
 from seamm_md_analysis import (
+    Estimate,
     collective_helfand_moments,
+    component_check,
     fit_green_kubo_integral,
     fit_helfand_moment,
     helfand_slope,
+    isotropic_average,
+    isotropy,
+    mean_and_stderr,
     open_md,
-    read_trajectory,
     tensor_correlation_functions,
 )
-import seamm_md_analysis.stats
 from seamm_md_analysis.requirements import Need, Requirements
 from seamm_md_analysis.step_support import (
     check_md_flowchart,
     md_inputs,
-    request_sampling,
-    run_own_md,
+    print_details,
+    read_files,
+    report_state,
+    size_warnings,
+    state_data,
 )
 from seamm_md_analysis.plots import (
     plot_correlation_functions,
@@ -57,6 +68,18 @@ logger = logging.getLogger(__name__)
 #: The shortest run, or block of a run, that can be analyzed: the correlation
 #: functions are kept to a tenth of it, and fitting them needs a little over 0.8 ps.
 MIN_RUN_TIME = Q_(10.0, "ps")
+#: The methods, in the order of the tables
+METHODS = ("Green-Kubo", "Helfand moments", "Helfand derivative")
+#: The names of the diagonal and off-diagonal components
+DIAGONAL = ("κ_xx", "κ_yy", "κ_zz")
+OFF_DIAGONAL = ("κ_xy", "κ_xz", "κ_yz")
+#: The results stored for each method: the key of κ and its standard error
+RESULT_KEYS = {
+    "Green-Kubo": "kappa",
+    "Helfand moments": "kappa (Helfand)",
+    "Helfand derivative": "kappa (Helfand derivative)",
+}
+
 job = printing.getPrinter()
 printer = printing.getPrinter("Thermal Conductivity")
 
@@ -67,11 +90,16 @@ if path.exists():
     molsystem.add_properties_from_file(csv_file)
 
 
-def fmt_err(value, err, precision=2):
-    """Format a value and its error, with 2 decimals when the error is unusable."""
-    return seamm_md_analysis.stats.fmt_err(
-        value, err, precision=precision, fallback_decimals=2
-    )
+def _fit(function, *args, **kwargs):
+    """The value of a fit, or NaN if it fails."""
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            result = function(*args, **kwargs)
+    except Exception:
+        return float("nan")
+    value = result.value if hasattr(result, "value") else result.slope
+    return float(value)
 
 
 class ThermalConductivity(seamm.Node):
@@ -80,16 +108,6 @@ class ThermalConductivity(seamm.Node):
 
     Attributes
     ----------
-    parser : configargparse.ArgParser
-        The parser object.
-
-    options : tuple
-        It contains a two item tuple containing the populated namespace and the
-        list of remaining argument strings.
-
-    subflowchart : seamm.Flowchart
-        A SEAMM Flowchart object that represents a subflowchart, if needed.
-
     parameters : ThermalConductivityParameters
         The control parameters for Thermal Conductivity.
 
@@ -103,38 +121,23 @@ class ThermalConductivity(seamm.Node):
         self,
         flowchart=None,
         title="Thermal Conductivity",
-        namespace="org.molssi.seamm",
         extension=None,
         logger=logger,
     ):
         """A step for Thermal Conductivity in a SEAMM flowchart.
 
-        You may wish to change the title above, which is the string displayed
-        in the box representing the step in the flowchart.
-
         Parameters
         ----------
         flowchart: seamm.Flowchart
             The non-graphical flowchart that contains this step.
-
         title: str
             The name displayed in the flowchart.
-        namespace : str
-            The namespace for the plug-ins of the subflowchart
         extension: None
             Not yet implemented
         logger : Logger = logger
             The logger to use and pass to parent classes
-
-        Returns
-        -------
-        None
         """
         logger.debug(f"Creating Thermal Conductivity {self}")
-        self.subflowchart = seamm.Flowchart(
-            parent=self, name="Thermal Conductivity", namespace=namespace
-        )
-
         super().__init__(
             flowchart=flowchart,
             title="Thermal Conductivity",
@@ -153,25 +156,28 @@ class ThermalConductivity(seamm.Node):
             ("xz", "rgb(255,0,255)", "rgba(255,0,255,0.1)"),
             ("yz", "rgb(0,255,255)", "rgba(0,255,255,0.1)"),
         ]
-        self._file_handler = None
-
-        # Various data
-        self.J = None  # The heat fluxes, nruns x 3 x n
-        self.V = []  # The volumes of the runs
-        self.T = []  # The temperatures of the runs
-        self.timestep = []  # The timestep in fs for the run
-        self.Ms = []  # Helfand moments per run
-        self.M = None  # The Helfand moments, 6 x m
-        self.M_err = None  # The stderr on HM, 6 x m
-        self.Jcfs = []  # The ccf's of J, 6 x n, per run
-        self.Jcf = None  # The ccf's of J, 6 x n
-        self.Jcf_err = None  # The stderr of ccf's, 6 x n
-        self.GK_integrals = []  # Cumulative integral of Jcf, per run
-        self.GK_integral = None  # Cumulative integral of Jcf
-        self.GK_integral_err = None  # Error of cumulative integral of Jcf
+        self._reset()
 
         # Set our citation level to 1!
         self.citation_level = 1
+
+    def _reset(self):
+        """Clear the data of earlier runs, e.g. from an earlier loop iteration."""
+        self.paths = []  # The md.h5md file of each run
+        self.V = []  # The volume of each run or block
+        self.T = []  # The temperature of each run or block
+        self.timestep = []  # The interval between samples of the heat flux, fs
+        self.Ms = []  # The Helfand moments of each run or block, 6 x m
+        self.M = None  # The mean Helfand moments, 6 x m
+        self.M_err = None  # Their spread over the runs or blocks, 6 x m
+        self.Jcfs = []  # The correlation functions of J, 6 x m, of each
+        self.Jcf = None  # Their mean, 6 x m
+        self.Jcf_err = None  # Their spread, 6 x m
+        self.GK_integrals = []  # The running integrals of the Jcf's, of each
+        self.GK_integral = None  # Their mean
+        self.GK_integral_err = None  # Their spread
+        self._total_time = Q_(0.0, "ps")  # The length of all the runs
+        self._isotropy = None  # Whether the runs are isotropic, and why
 
     @property
     def version(self):
@@ -187,8 +193,6 @@ class ThermalConductivity(seamm.Node):
         """Setup the command-line / config file parser"""
         parser_name = "thermal-conductivity-step"
         parser = seamm_util.getParser()
-
-        self.subflowchart._parser = self.flowchart._parser
 
         # Remember if the parser exists ... this type of step may have been
         # found before
@@ -206,24 +210,19 @@ class ThermalConductivity(seamm.Node):
                 help="whether to write out html files for graphs, etc.",
             )
 
-        # Now need to walk through the steps in the subflowchart...
-        self.subflowchart.reset_visited()
-        node = self.subflowchart.get_node("1").next()
-        while node is not None:
-            node = node.create_parser()
-
         return self.next()
 
     def description_text(self, P=None, short=False):
         """Create the text description of what this step will do.
-        The dictionary of control values is passed in as P so that
-        the code can test values, etc.
 
         Parameters
         ----------
         P: dict
             An optional dictionary of the current values of the control
             parameters.
+        short : bool
+            Unused: the description is always short.
+
         Returns
         -------
         str
@@ -232,61 +231,19 @@ class ThermalConductivity(seamm.Node):
         if P is None:
             P = self.parameters.values_to_dict()
 
-        source = P.get("md source", run_own_md)
-        if source == run_own_md:
-            text = (
-                f"Calculate the thermal conductivity at {P['T']} using "
-                f"the {P['approach']} approach. {P['nruns']} runs will be averaged "
-                "for the final results.\n\n"
-            )
+        source = P["md source"]
+        text = (
+            "Calculate the thermal conductivity from the heat flux, by the Green-Kubo "
+            "and Helfand methods, from "
+        )
+        if source == read_files:
+            text += f"the MD in {P['md files']}."
         else:
-            text = "Calculate the thermal conductivity by the Green-Kubo approach from "
-            if source == "files":
-                text += f"the MD in {P['md files']}.\n\n"
-            else:
-                text += f"{source} earlier in the flowchart.\n\n"
-            short = True
-        if not short:
-            # The subflowchart
-            self.subflowchart.root_directory = self.flowchart.root_directory
-
-            # Get the first real node
-            node = self.subflowchart.get_node("1").next()
-
-            while node is not None:
-                try:
-                    text += __(node.description_text()).__str__()
-                except Exception as e:
-                    print(
-                        f"Error describing thermal_conductivity flowchart: {e} in "
-                        f"{node}"
-                    )
-                    self.logger.critical(
-                        f"Error describing thermal_conductivity flowchart: {e} in "
-                        f"{node}"
-                    )
-                    raise
-                except:  # noqa: E722
-                    print(
-                        "Unexpected error describing thermal_conductivity flowchart: "
-                        f"{sys.exc_info()[0]} in {str(node)}"
-                    )
-                    self.logger.critical(
-                        "Unexpected error describing thermal_conductivity flowchart: "
-                        f"{sys.exc_info()[0]} in {str(node)}"
-                    )
-                    raise
-                text += "\n"
-                node = node.next()
-
-        return self.header + "\n" + __(text, **P, indent=4 * " ").__str__()
+            text += f"{source} earlier in the flowchart."
+        return self.header + "\n" + __(text, indent=4 * " ").__str__()
 
     def run(self):
         """Run a Thermal Conductivity step.
-
-        Parameters
-        ----------
-        None
 
         Returns
         -------
@@ -301,202 +258,62 @@ class ThermalConductivity(seamm.Node):
         )
 
         # Print what we are doing
-        printer.important(__(self.description_text(P, short=True), indent=self.indent))
+        printer.important(__(self.description_text(P), indent=self.indent))
 
-        own_md = P["md source"] == run_own_md
         _, configuration = self.get_system_configuration()
-        if own_md and configuration is not None and configuration.periodicity != 3:
-            raise RuntimeError(
-                "The Thermal Conductivity step needs a periodic system: the heat "
-                "flux is divided by the volume of the periodic cell."
-            )
 
-        # Find the handler for job.out and set the level up
-        job_handler = None
-        out_handler = None
-        job_level = None
-        out_level = None
-        for handler in job.handlers:
-            if (
-                isinstance(handler, logging.FileHandler)
-                and "job.out" in handler.baseFilename
-            ):
-                job_handler = handler
-                job_level = job_handler.level
-                job_handler.setLevel(printing.JOB)
-            elif isinstance(handler, logging.StreamHandler):
-                out_handler = handler
-                out_level = out_handler.level
-                out_handler.setLevel(printing.JOB)
+        self._reset()
+        self.paths = md_inputs(self, P, name="heat_flux")
+        if len(self.paths) == 0:
+            raise RuntimeError("No MD run finished, so there is nothing to analyze.")
+        runs = [self._read_md_file(path) for path in self.paths]
 
-        if not own_md:
-            self._analyze_earlier_md(
-                P, (job_handler, job_level, out_handler, out_level)
-            )
-            return next_node
+        text = f"Analyzing {len(runs)} MD run{'s' if len(runs) > 1 else ''}"
+        if len(runs) == 1:
+            source = "blocks"
+            samples = self._split_into_blocks(runs[0], P["number of blocks"])
+            text += f", divided into {len(samples)} blocks to estimate the errors"
+        else:
+            source = "runs"
+            samples = runs
+        text += ": " + ", ".join(str(p) for p in self.paths)
+        printer.job(__(text, indent=self.indent + 4 * " "))
+        printer.job("")
 
-        # Turn on any sampling the analysis needs but the MD lacks
-        changes, missing = request_sampling(self.subflowchart, self.md_requirements())
-        for change in changes:
-            printer.job(__(f"Note: {change}.", indent=self.indent + 4 * " "))
-        if len(missing) > 0:
-            raise RuntimeError(
-                "The MD in the sub-flowchart cannot provide what is needed: "
-                + " ".join(missing)
-            )
+        for i, data in enumerate(samples, start=1):
+            self.process_run(i, data, what="Block" if source == "blocks" else "Run")
+        self._combine()
 
-        # Get the first real node
-        first_node = self.subflowchart.get_node("1").next()
-
-        # Ensure the nodes have their options
-        node = first_node
-        while node is not None:
-            node.all_options = self.all_options
-            node = node.next()
-
-        # And the subflowchart has the executor
-        self.subflowchart.executor = self.flowchart.executor
-
-        # Loop over the runs
-        nruns = P["nruns"]
-        fmt = f"0{len(str(nruns))}"
-        for run in range(1, nruns + 1):
-            # Direct most output to iteration.out
-            run_dir = Path(self.directory) / f"run_{run:{fmt}}"
-            run_dir.mkdir(parents=True, exist_ok=True)
-
-            # A handler for the file
-            if self._file_handler is not None:
-                self._file_handler.close()
-                job.removeHandler(self._file_handler)
-            path = run_dir / "Run.out"
-            path.unlink(missing_ok=True)
-            self._file_handler = logging.FileHandler(path)
-            self._file_handler.setLevel(printing.NORMAL)
-            formatter = logging.Formatter(fmt="{message:s}", style="{")
-            self._file_handler.setFormatter(formatter)
-            job.addHandler(self._file_handler)
-
-            # Add the run to the ids so the directory structure is reasonable
-            self.flowchart.reset_visited()
-            self.set_subids((*self._id, f"run_{run:{fmt}}"))
-
-            # Run through the steps in the loop body
-            node = first_node
-            try:
-                while node is not None:
-                    node = node.run()
-            except DeprecationWarning as e:
-                printer.normal("\nDeprecation warning: " + str(e))
-                traceback.print_exc(file=sys.stderr)
-                traceback.print_exc(file=sys.stdout)
-            except Exception as e:
-                printer.job(f"Caught exception in run {run}: {str(e)}")
-                with open(run_dir / "stderr.out", "a") as fd:
-                    traceback.print_exc(file=fd)
-                if "continue" in P["errors"]:
-                    continue
-                elif "exit" in P["errors"]:
-                    break
-                else:
-                    raise
-            else:
-                self.process_run(run, run_dir)
-                if True and len(self.V) > 1:
-                    if job_handler is not None:
-                        job_handler.setLevel(job_level)
-                    if out_handler is not None:
-                        out_handler.setLevel(out_level)
-
-                    self.analyze(P=P, style="1-line", run=run)
-
-                    if job_handler is not None:
-                        job_handler.setLevel(printing.JOB)
-                    if out_handler is not None:
-                        out_handler.setLevel(printing.JOB)
-
-            self.logger.debug(f"End of run {run}")
-
-        # Remove any redirection of printing.
-        if self._file_handler is not None:
-            self._file_handler.close()
-            job.removeHandler(self._file_handler)
-            self._file_handler = None
-        if job_handler is not None:
-            job_handler.setLevel(job_level)
-        if out_handler is not None:
-            out_handler.setLevel(out_level)
-
-        # Analyze the results
-        self.analyze(P=P, style="full")
-
-        # Add other citations here or in the appropriate place in the code.
-        # Add the bibtex to data/references.bib, and add a self.reference.cite
-        # similar to the above to actually add the citation to the references.
+        self.analyze(P=P, configuration=configuration, source=source)
 
         return next_node
 
-    def analyze(self, indent="", P=None, style="full", run=None, **kwargs):
-        """Do any analysis of the output from this step.
+    def analyze(self, indent="", P=None, configuration=None, source="runs", **kwargs):
+        """Fit, print, plot and store the thermal conductivity.
 
-        Also print important results to the local step.out file using
-        "printer".
+        The value of each method is the average over the runs (or blocks) of the
+        average of the three diagonal components fitted to each run; its error is
+        the standard error of these averages. The curves averaged over the runs are
+        fitted too, for the graphs.
 
         Parameters
         ----------
         indent: str
             An extra indentation for the output
+        P : dict
+            The values of the parameters.
+        configuration : molsystem._Configuration
+            The configuration for the results.
+        source : str
+            What the samples are: "runs" or "blocks".
         """
-        if style == "1-line":
-            table = {
-                "Run": [],
-                "Kxx": [],
-                "exx": [],
-                "Kyy": [],
-                "eyy": [],
-                "Kzz": [],
-                "ezz": [],
-                "Kxy": [],
-                "exy": [],
-                "Kxz": [],
-                "exz": [],
-                "Kyz": [],
-                "eyz": [],
-            }
-        elif style == "full":
-            table = {
-                "Method": [],
-                "Dir": [],
-                "Kappa": [],
-                "±": [],
-                "95%": [],
-                "Units": [],
-            }
-
-        # The errors of the fits to the averaged curves treat strongly correlated
-        # points as independent, so they are far too small. Instead the error of
-        # each value is the standard error of the values fitted to each run. With
-        # a single run there is none.
-        def stderr_over_runs(fit_one, runs):
-            values = []
-            for run_data in runs:
-                try:
-                    values.append(fit_one(run_data))
-                except Exception:
-                    pass
-            values = np.array([v for v in values if np.isfinite(v)])
-            if values.size < 2:
-                return None
-            return float(np.std(values, ddof=1) / np.sqrt(values.size))
-
-        def fmt_95(value, stderr):
-            return fmt_err(value, None if stderr is None else 2 * stderr)
-
+        n_samples = len(self.Ms)
         dt = Q_(self.timestep[0], "fs")
-        ts = np.arange(self.M.shape[1]) * dt.m_as("ps")  # Scale to ps
-        ts = ts.tolist()
+        ts = (np.arange(self.M.shape[1]) * dt.m_as("ps")).tolist()
+        notes = []
 
-        # Get and plot the slopes of the Helfand moments
+        # The derivative of the averaged Helfand moments, fitted like the Green-Kubo
+        # integral. Its time constants set where the Helfand moments are fitted.
         slopes = []
         xs = []
         errs = []
@@ -506,28 +323,14 @@ class ThermalConductivity(seamm.Node):
             slopes.append(slope)
             xs.append(x)
             errs.append(err)
-
             if i < 3:
-                (
-                    kappa,
-                    fit_err,
-                    a,
-                    a_err,
-                    tau,
-                    tau_err,
-                    tf,
-                    yf,
-                ) = fit_green_kubo_integral(slope, x, sigma=err)
-                kappa_err = stderr_over_runs(
-                    lambda M: fit_green_kubo_integral(
-                        *helfand_slope(M[i], ts, np.zeros(len(ts)))[:2]
-                    ).value,
-                    self.Ms,
+                kappa, fit_err, a, a_err, tau, tau_err, tf, yf = (
+                    fit_green_kubo_integral(slope, x, sigma=err)
                 )
                 fit0.append(
                     {
                         "kappa": kappa,
-                        "stderr": fit_err if kappa_err is None else kappa_err,
+                        "stderr": fit_err,
                         "xs": tf,
                         "ys": yf,
                         "a": a,
@@ -536,145 +339,54 @@ class ThermalConductivity(seamm.Node):
                         "tau_err": tau_err,
                     }
                 )
-                v, e = fmt_95(kappa, kappa_err)
-                if style == "1-line":
-                    if i == 0:
-                        table["Run"].append(len(self.V))
-                    alpha = self.tensor_labels[i][0]
-                    table["K" + alpha].append(v)
-                    table["e" + alpha].append(e)
-                elif style == "full":
-                    table["Method"].append("Helfand Derivative" if i == 0 else "")
-                    table["Dir"].append(self.tensor_labels[i][0])
-                    table["Kappa"].append(v)
-                    table["±"].append("±")
-                    table["95%"].append(e)
-                    table["Units"].append("W/m/K" if i == 0 else "")
-            else:
-                if style == "1-line":
-                    # blank the off-diagonals
-                    alpha = self.tensor_labels[i][0]
-                    table["K" + alpha].append("")
-                    table["e" + alpha].append("")
+        self._plot_helfand_derivatives(slopes, xs, errs, fit0)
 
-        figure = self.create_figure(
-            module_path=("seamm",),
-            template="line.graph_template",
-            title="Helfand Derivatives",
-        )
+        starts = [max(1.0, 3 * max(f["tau"])) for f in fit0]
+        starts.extend([max(starts)] * 3)
 
-        plot_helfand_slopes(
-            figure, slopes, xs[0], err=errs, fit=fit0, labels=self.tensor_labels
-        )
-
-        figure.grid_plots("Slope")
-
-        # Write to disk
-        filename = "HelfandDerivatives.graph"
-        path = Path(self.directory) / filename
-        figure.dump(path)
-
-        if "html" in self.options and self.options["html"]:
-            path = path.with_suffix(".html")
-            figure.template = "line.html_template"
-            figure.dump(path)
-
-        # Fit the slopes
+        # The slopes of the averaged Helfand moments
         fit = []
         for i in range(6):
-            if i < len(fit0):
-                start = max(fit0[i]["tau"]) * 3
-            else:
-                start = 1
-            if start < 1:
-                start = 1
-
-            if self.logger.isEnabledFor(logging.DEBUG):
-                self.logger.debug("\n\n\n**********************\n")
-                self.logger.debug(f"{i=}")
-                for v1, v2, v3 in zip(ts[0:9], self.M[i][0:9], self.M_err[i][0:9]):
-                    self.logger.debug(f"   {v1:.3f} {v2:12.4e} {v3:12.4e}")
-                self.logger.debug("...")
-                for v1, v2, v3 in zip(
-                    ts[-9:-1], self.M[i][-9:-1], self.M_err[i][-9:-1]
-                ):
-                    self.logger.debug(f"   {v1:.3f} {v2:12.4e} {v3:12.4e}")
-                self.logger.debug(f"{start=}")
-                self.logger.debug("--------")
-                self.logger.debug("")
-
             try:
-                slope, err, xs, ys = fit_helfand_moment(
-                    self.M[i], ts, sigma=self.M_err[i], start=start, logger=self.logger
-                )
-                kappa_err = stderr_over_runs(
-                    lambda M: fit_helfand_moment(M[i], ts, start=start).slope,
-                    self.Ms,
-                )
-                if kappa_err is not None:
-                    err = kappa_err
-                fit.append(
-                    {
-                        "kappa": slope,
-                        "stderr": err,
-                        "xs": xs,
-                        "ys": ys,
-                    }
-                )
-                v, e = fmt_95(slope, kappa_err)
-                if style == "1-line":
-                    alpha = self.tensor_labels[i][0]
-                    table["K" + alpha].append(v)
-                    table["e" + alpha].append(e)
-                elif style == "full":
-                    table["Method"].append("Helfand Moments" if i == 0 else "")
-                    table["Dir"].append(self.tensor_labels[i][0])
-                    table["Kappa"].append(v)
-                    table["±"].append("±")
-                    table["95%"].append(e)
-                    table["Units"].append("W/m/K" if i == 0 else "")
-            except Exception as e:
-                logger.warning("The fit of the Helfand moments failed. Continuing...")
-                logger.warning(e)
-                if style == "full" and i == 0:
-                    printer.normal(
-                        __(
-                            "Note: the Helfand moments could not be fitted. The fit "
-                            f"starts at {start:.2f} ps, but the moments extend only "
-                            f"to {ts[-1]:.2f} ps, a tenth of the length of each run "
-                            "(or block). Use longer runs, or fewer blocks.",
-                            indent=8 * " ",
-                        )
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    slope, err, fxs, fys = fit_helfand_moment(
+                        self.M[i],
+                        ts,
+                        sigma=self.M_err[i],
+                        start=starts[i],
+                        logger=self.logger,
                     )
-
+                fit.append({"kappa": slope, "stderr": err, "xs": fxs, "ys": fys})
+            except Exception as e:
+                logger.warning(f"The fit of the Helfand moments failed: {e}")
+                if i == 0:
+                    notes.append(
+                        "The Helfand moments could not be fitted. The fit starts at "
+                        f"{starts[i]:.2f} ps, but the moments extend only to "
+                        f"{ts[-1]:.2f} ps, a tenth of the length of each run (or "
+                        "block). Use longer runs, or fewer blocks."
+                    )
+                break
         self.plot_helfand_moment(self.M, ts, M_err=self.M_err, fit=fit)
+        helfand_fitted = len(fit) > 0
 
-        # Now for the Green-Kubo method
-
-        dt = Q_(self.timestep[0], "fs")
-
-        # Plot the correlation functions
-        ts = (np.arange(self.Jcf.shape[1]) * dt.m_as("ps")).tolist()
-        end = len(ts) // 4
-        self.plot_JJ_correlation(self.Jcf[:, :end], ts[:end], err=self.Jcf_err[:, :end])
-
-        # Fit the integrals to 1 - e(-tau/t0)
-        ts = np.arange(self.GK_integral.shape[1]) * dt.m_as("ps")
-        ts = ts.tolist()
-
+        # The Green-Kubo integrals averaged over the runs
+        cf_ts = (np.arange(self.Jcf.shape[1]) * dt.m_as("ps")).tolist()
+        end = len(cf_ts) // 4
+        self.plot_JJ_correlation(
+            self.Jcf[:, :end], cf_ts[:end], err=self.Jcf_err[:, :end]
+        )
+        gk_ts = (np.arange(self.GK_integral.shape[1]) * dt.m_as("ps")).tolist()
         fit = []
         for i in range(3):
             kappa, fit_err, a, a_err, tau, tau_err, tf, yf = fit_green_kubo_integral(
-                self.GK_integral[i], ts, sigma=self.GK_integral_err[i]
-            )
-            kappa_err = stderr_over_runs(
-                lambda integral: fit_green_kubo_integral(integral[i], ts).value,
-                self.GK_integrals,
+                self.GK_integral[i], gk_ts, sigma=self.GK_integral_err[i]
             )
             fit.append(
                 {
                     "kappa": kappa,
-                    "stderr": fit_err if kappa_err is None else kappa_err,
+                    "stderr": fit_err,
                     "xs": tf,
                     "ys": yf,
                     "a": a,
@@ -683,86 +395,269 @@ class ThermalConductivity(seamm.Node):
                     "tau_err": tau_err,
                 }
             )
-            v, e = fmt_95(kappa, kappa_err)
+        self.plot_GK_integral(
+            self.GK_integral, gk_ts, err=self.GK_integral_err, fit=fit
+        )
 
-            if style == "1-line":
-                if i == 0:
-                    table["Run"].append("")
-                alpha = self.tensor_labels[i][0]
-                table["K" + alpha].append(v)
-                table["e" + alpha].append(e)
-            elif style == "full":
-                table["Method"].append("Green-Kubo" if i == 0 else "")
-                table["Dir"].append(self.tensor_labels[i][0])
-                table["Kappa"].append(v)
-                table["±"].append("±")
-                table["95%"].append(e)
-                table["Units"].append("W/m/K" if i == 0 else "")
+        # The values fitted to each run or block
+        per_sample, off_diagonal = self._per_sample(ts, gk_ts, starts)
 
-        for i in range(3, 6):
-            alpha = self.tensor_labels[i][0]
-            if style == "1-line":
-                # blank the off-diagonals
-                table["K" + alpha].append("")
-                table["e" + alpha].append("")
+        estimates = {}
+        components = {}
+        what = "run" if source == "runs" else "block"
+        for method in METHODS:
+            values = per_sample[method]
+            estimate = isotropic_average(values)
+            estimate.source = source
+            estimate.units = "W/m/K"
+            estimates[method] = estimate
+            components[method] = [
+                Estimate.from_samples(values[:, i], units="W/m/K", source=source)
+                for i in range(3)
+            ]
+            failed = int(np.sum(~np.all(np.isfinite(values), axis=1)))
+            if failed == n_samples:
+                # The failure of the Helfand moments is explained above
+                if method != "Helfand moments" or helfand_fitted:
+                    notes.append(f"The {method} fit failed for every {what}.")
+            elif failed > 0:
+                notes.append(
+                    f"The {method} fit failed for {failed} of the {n_samples} "
+                    f"{source}, which are left out."
+                )
 
-        # Plot the Green-Kubo integrals
-        self.plot_GK_integral(self.GK_integral, ts, err=self.GK_integral_err, fit=fit)
+        isotropic, why = self._isotropy
+        table = {"Method": [], "κ": [], "± (95%)": [], "Units": []}
 
-        # Print the table of results
-        if style == "1-line":
-            text = ""
-            tmp = tabulate(
-                table,
-                headers="keys",
-                tablefmt="simple_outline",
-                disable_numparse=True,
-            )
-            if len(self.V) == 2:
-                length = len(tmp.splitlines()[0])
-                text += "\n"
-                text += "Thermal Conductivity".center(length)
-                text += "\n"
-                text += "--------------------".center(length)
-                text += "\n"
-                text += "First line is the fit to Helfand derivative".center(length)
-                text += "\n"
-                text += "Second line is the slope of the Helfand moments".center(length)
-                text += "\n"
-                text += "Third line is the fit to Green-Kubo integral".center(length)
-                text += "\n"
-                text += "\n".join(tmp.splitlines()[0:-1])
+        def row(label, estimate):
+            if estimate.n == 0 or not np.isfinite(estimate.value):
+                v, e = "--", ""
             else:
-                if run is not None and run == P["nruns"]:
-                    text += "\n".join(tmp.splitlines()[-4:])
-                else:
-                    text += "\n".join(tmp.splitlines()[-4:-1])
+                v, e = estimate.formatted()
+            table["Method"].append(label)
+            table["κ"].append(v)
+            table["± (95%)"].append(e)
+            table["Units"].append("W/m/K")
 
-            printer.normal(__(text, indent=8 * " ", wrap=False, dedent=False))
+        for method in METHODS:
+            row(method, estimates[method])
+            if not isotropic:
+                for name, estimate in zip(DIAGONAL, components[method]):
+                    row(f"{method}, {name}", estimate)
+
+        text = tabulate(
+            table,
+            headers="keys",
+            tablefmt="rounded_outline",
+            disable_numparse=True,
+            colalign=("left", "decimal", "decimal", "left"),
+        )
+        length = len(text.splitlines()[0])
+        printer.normal(
+            __(
+                "\n" + "Thermal Conductivity".center(length) + "\n" + text,
+                indent=8 * " ",
+                wrap=False,
+                dedent=False,
+            )
+        )
+
+        # What the table is from, and the checks
+        nruns = len(self.paths)
+        total = self._total_time.m_as("ps")
+        line = (
+            f"From {nruns} run{'s' if nruns > 1 else ''} of MD, {total:.0f} ps in "
+            f"all, with the heat flux every {dt.m_as('fs'):.3g} fs"
+        )
+        if source == "blocks":
+            line += f", divided into {n_samples} blocks"
+        lines = [line + ". " + estimates["Green-Kubo"].describe_error()]
+        if isotropic:
+            check = component_check(per_sample["Green-Kubo"], names=DIAGONAL)
+            line = check.text
+            off = self._off_diagonal_check(off_diagonal)
+            if off != "":
+                line += " " + off
+            lines.append(line)
         else:
-            text = ""
-            tmp = tabulate(
+            lines.append(
+                f"The {'runs are' if nruns > 1 else 'run is'} not treated as "
+                f"isotropic ({why}), so the diagonal components are given; κ is a "
+                "third of their sum."
+            )
+        for line in lines + notes:
+            printer.normal(__(line, indent=8 * " "))
+        printer.normal("")
+
+        self._print_samples(per_sample, off_diagonal, source)
+
+        state = report_state(self, printer, self.paths)
+
+        # Store the results
+        self.model = self._find_model()
+        data = {"nruns": nruns}
+        for method in METHODS:
+            estimate = estimates[method]
+            if estimate.n == 0 or not np.isfinite(estimate.value):
+                continue
+            key = RESULT_KEYS[method]
+            data[key] = estimate.value
+            if estimate.stderr is not None:
+                data[f"{key},stderr"] = estimate.stderr
+        for name, estimate in zip(("xx", "yy", "zz"), components["Green-Kubo"]):
+            if estimate.n == 0:
+                continue
+            data[f"kappa_{name}"] = estimate.value
+            if estimate.stderr is not None:
+                data[f"kappa_{name},stderr"] = estimate.stderr
+        if state is not None:
+            data.update(state_data(state))
+        self.store_results(configuration=configuration, data=data)
+
+    def _per_sample(self, ts, gk_ts, starts):
+        """κ fitted to each run or block, by each method.
+
+        Parameters
+        ----------
+        ts : [float]
+            The times of the Helfand moments, in ps.
+        gk_ts : [float]
+            The times of the Green-Kubo integrals, in ps.
+        starts : [float]
+            Where to start the fit of each component of the Helfand moments, in ps.
+
+        Returns
+        -------
+        {str: numpy.ndarray(n, 3)}
+            The diagonal components by each method; NaN where a fit failed.
+        numpy.ndarray(n, 3)
+            The off-diagonal components from the Helfand moments.
+        """
+        n = len(self.Ms)
+        result = {method: np.full((n, 3), np.nan) for method in METHODS}
+        off_diagonal = np.full((n, 3), np.nan)
+        zeros = np.zeros(len(ts))
+        for s, (M, integral) in enumerate(zip(self.Ms, self.GK_integrals)):
+            for i in range(3):
+                result["Green-Kubo"][s, i] = _fit(
+                    fit_green_kubo_integral, integral[i], gk_ts
+                )
+                result["Helfand moments"][s, i] = _fit(
+                    fit_helfand_moment, M[i], ts, start=starts[i]
+                )
+                slope, x, _ = helfand_slope(M[i], ts, zeros)
+                result["Helfand derivative"][s, i] = _fit(
+                    fit_green_kubo_integral, slope, x
+                )
+            for i in range(3, 6):
+                off_diagonal[s, i - 3] = _fit(
+                    fit_helfand_moment, M[i], ts, start=starts[i]
+                )
+        return result, off_diagonal
+
+    @staticmethod
+    def _off_diagonal_check(off_diagonal):
+        """One sentence: whether the off-diagonal terms are zero within their
+        errors, as they should be for an isotropic system; empty if it cannot be
+        told.
+
+        Each term is tested against zero with Student's t (n - 1 degrees of freedom,
+        since the errors come from only n runs or blocks), and the smallest p-value
+        is corrected for the three tests (Bonferroni).
+        """
+        values = np.asarray(off_diagonal, dtype=float)
+        values = values[np.all(np.isfinite(values), axis=1)]
+        n = len(values)
+        if n < 2:
+            return ""
+        means, stderrs = mean_and_stderr(values)
+        if not np.all(stderrs > 0):
+            return ""
+        from scipy import stats
+
+        t = np.abs(means / stderrs)
+        worst = int(np.argmax(t))
+        p = min(1.0, len(t) * float(2 * stats.t.sf(t[worst], n - 1)))
+        name = OFF_DIAGONAL[worst]
+        how_far = f"{t[worst]:.1f} standard errors from zero; p = {p:.2g}"
+        if p >= 0.01:
+            return (
+                "The off-diagonal terms are zero within their errors (the largest, "
+                f"{name}, is {how_far})."
+            )
+        return (
+            f"The off-diagonal terms are not zero within their errors ({name} is "
+            f"{how_far}): the system may not be isotropic, or the runs too short."
+        )
+
+    def _print_samples(self, per_sample, off_diagonal, source):
+        """The values fitted to each run or block, in the detailed output."""
+        what = "Run" if source == "runs" else "Block"
+        diagonal = np.concatenate([per_sample[m] for m in METHODS])
+        largest = np.nanmax(np.abs(diagonal)) if np.any(np.isfinite(diagonal)) else 1
+        decimals = max(0, 3 - floor(log10(largest))) if largest > 0 else 3
+
+        def fmt(value):
+            return f"{value:.{decimals}f}" if np.isfinite(value) else "--"
+
+        for method in METHODS:
+            values = per_sample[method]
+            table = {what: [], "κ": []}
+            for name in DIAGONAL:
+                table[name] = []
+            if method == "Helfand moments":
+                for name in OFF_DIAGONAL:
+                    table[name] = []
+            for s, components in enumerate(values):
+                table[what].append(str(s + 1))
+                table["κ"].append(fmt(components.mean()))
+                for name, value in zip(DIAGONAL, components):
+                    table[name].append(fmt(value))
+                if method == "Helfand moments":
+                    for name, value in zip(OFF_DIAGONAL, off_diagonal[s]):
+                        table[name].append(fmt(value))
+            text = tabulate(
                 table,
                 headers="keys",
-                tablefmt="simple_outline",
+                tablefmt="rounded_outline",
                 disable_numparse=True,
-                colalign=(
-                    "center",
-                    "center",
-                    "decimal",
-                    "center",
-                    "decimal",
-                    "left",
-                ),
+                colalign=("center",) + ("decimal",) * (len(table) - 1),
             )
-            length = len(tmp.splitlines()[0])
-            text += "\n"
-            text += "Thermal Conductivity".center(length)
-            text += "\n"
-            text += tmp
-            text += "\n"
+            length = len(text.splitlines()[0])
+            title = f"{method} by {what.lower()} (W/m/K)".center(length)
+            print_details(
+                printer,
+                str(__("\n" + title + "\n" + text + "\n", indent=8 * " ", wrap=False)),
+            )
 
-            printer.normal(__(text, indent=8 * " ", wrap=False, dedent=False))
+    def _find_model(self):
+        """The model (forcefield or model chemistry) of the MD, for properties."""
+        try:
+            if self.variable_exists("_model_chemistry"):
+                return self.get_variable("_model_chemistry")["level"]
+            ff = self.get_variable("_forcefield")
+            return ff.current_forcefield
+        except Exception:
+            return "unknown"
+
+    def _plot_helfand_derivatives(self, slopes, xs, errs, fit):
+        """Plot the derivatives of the Helfand moments and their fits."""
+        figure = self.create_figure(
+            module_path=("seamm",),
+            template="line.graph_template",
+            title="Helfand Derivatives",
+        )
+        plot_helfand_slopes(
+            figure, slopes, xs[0], err=errs, fit=fit, labels=self.tensor_labels
+        )
+        figure.grid_plots("Slope")
+
+        path = Path(self.directory) / "HelfandDerivatives.graph"
+        figure.dump(path)
+        if "html" in self.options and self.options["html"]:
+            path = path.with_suffix(".html")
+            figure.template = "line.html_template"
+            figure.dump(path)
 
     def plot_GK_integral(self, x, ts, err=None, fit=None, filename="GK_integral.graph"):
         """Create a plot of the GK integrals and any fit to them.
@@ -850,7 +745,7 @@ class ThermalConductivity(seamm.Node):
             figure.dump(path)
 
     def plot_JJ_correlation(self, CCF, ts, err=None, fit=None, filename="JJ.graph"):
-        """Create a plot of the orrelation functions and any fit to them.
+        """Create a plot of the correlation functions and any fit to them.
 
         Parameters
         ----------
@@ -890,30 +785,25 @@ class ThermalConductivity(seamm.Node):
             figure.template = "line.html_template"
             figure.dump(path)
 
-    def process_run(self, run, run_dir, data=None):
-        """Get the heat fluxes from the run and do initial processing.
+    def process_run(self, run, data, what="Run"):
+        """Calculate the Helfand moments and correlation functions of one run or
+        block.
 
         Parameters
         ----------
         run : int
-            The run number
-        run_dir : pathlib.Path or None
-            The toplevel directory of the run, or None if `data` is given.
-        data : (numpy.ndarray, pint.Quantity, float, float) = None
+            The number of the run or block, for messages.
+        data : (numpy.ndarray, pint.Quantity, float, float)
             The heat flux (3 × n, W/m^2), the sampling interval, the temperature (K)
-            and the volume (Å^3), already read, e.g. from earlier in the flowchart.
+            and the volume (Å^3).
+        what : str
+            "Run" or "Block", for messages.
         """
-        result = data
-        if result is None:
-            result = self._read_h5md(run, run_dir)
-        if result is None:
-            result = self._read_legacy(run, run_dir)
-        J, dt, T, V = result
+        J, dt, T, V = data
         self.V.append(V)
         self.T.append(T)
         self.timestep.append(dt.m_as("fs"))
 
-        # We need properties like the temperature and volume.
         T = Q_(T, "K")
         V = Q_(V, "Å^3")
         k_B = Q_("k_B")
@@ -924,12 +814,12 @@ class ThermalConductivity(seamm.Node):
         m = min(n // 10, 10000)
         if n * dt < MIN_RUN_TIME:
             raise RuntimeError(
-                f"Run {run} is only {(n * dt).to('ps'):~P} long, but at least "
+                f"{what} {run} is only {(n * dt).to('ps'):~P} long, but at least "
                 f"{MIN_RUN_TIME:~P} is needed for the correlation functions to be "
                 "fitted."
             )
 
-        # Create the Helfand moments
+        # The Helfand moments
         constants = Jsq * V * dt**2 / (2 * k_B * T**2)
         M = collective_helfand_moments(J, m=m) * constants.m_as("W/m/K*ps")
         self.Ms.append(M)
@@ -939,19 +829,17 @@ class ThermalConductivity(seamm.Node):
         Jcf, integral = tensor_correlation_functions(J, m=m)
         self.Jcfs.append(Jcf)
         self.GK_integrals.append(integral * constants.m_as("W/m/K"))
-        # Merge the results and get the averages and errors
-        tmp = np.stack(self.Ms)
-        self.M = np.average(tmp, axis=0)
-        self.M_err = np.std(tmp, axis=0)
-        tmp = np.stack(self.Jcfs)
-        self.Jcf = np.average(tmp, axis=0)
-        self.Jcf_err = np.std(tmp, axis=0)
-        tmp = np.stack(self.GK_integrals)
-        self.GK_integral = np.average(tmp, axis=0)
-        self.GK_integral_err = np.std(tmp, axis=0)
+
+    def _combine(self):
+        """The averages of the curves over the runs or blocks, and their spread."""
+        for name in ("M", "Jcf", "GK_integral"):
+            curves = np.stack(getattr(self, name + "s"))
+            setattr(self, name, np.average(curves, axis=0))
+            setattr(self, name + "_err", np.std(curves, axis=0))
 
     def md_requirements(self, P=None):
-        """What the analysis needs from the MD: the heat flux every two steps."""
+        """What the analysis needs from the MD: the heat flux every two steps, in a
+        periodic cell. It analyzes the dynamics."""
         return Requirements(
             needs=[
                 Need(
@@ -961,6 +849,7 @@ class ThermalConductivity(seamm.Node):
                 )
             ],
             periodic=True,
+            dynamics=True,
         )
 
     def _static(self, key):
@@ -971,7 +860,8 @@ class ThermalConductivity(seamm.Node):
         return parameter.get()
 
     def check_flowchart(self, preceding):
-        """Check, before the job runs, that the MD will sample what is needed.
+        """Check, before the job runs, that the MD will sample what is needed and is
+        set up for the analysis.
 
         Parameters
         ----------
@@ -991,58 +881,36 @@ class ThermalConductivity(seamm.Node):
     def check_configuration(self, configuration):
         """Called by an MD step before it runs MD that this step will analyze.
 
+        Returns
+        -------
+        [str]
+            Warnings about the structure, e.g. that it is small.
+
         Raises
         ------
         RuntimeError
             If the system is not periodic.
         """
-        if self._static("md source") == run_own_md:
-            return
         if configuration.periodicity != 3:
             raise RuntimeError(
                 f"'{self.title}' will analyze the MD, but the system is not "
                 "periodic: the heat flux is divided by the volume of the cell."
             )
-
-    def _analyze_earlier_md(self, P, handlers):
-        """Analyze MD run earlier in the flowchart, or in other jobs."""
-        job_handler, job_level, out_handler, out_level = handlers
-        paths = md_inputs(self, P, name="heat_flux")
-        runs = [self._read_md_file(path) for path in paths]
-
-        text = f"Analyzing {len(paths)} MD run{'s' if len(paths) > 1 else ''}"
-        if len(runs) == 1:
-            runs = self._split_into_blocks(runs[0], P["number of blocks"])
-            text += f", divided into {len(runs)} blocks to estimate the errors"
-        text += ": " + ", ".join(str(p) for p in paths)
-        printer.job(__(text, indent=self.indent + 4 * " "))
-        printer.job("")
-
-        P["nruns"] = len(runs)
-        for run, data in enumerate(runs, start=1):
-            self.process_run(run, None, data=data)
-            if len(self.V) > 1:
-                if job_handler is not None:
-                    job_handler.setLevel(job_level)
-                if out_handler is not None:
-                    out_handler.setLevel(out_level)
-                self.analyze(P=P, style="1-line", run=run)
-                if job_handler is not None:
-                    job_handler.setLevel(printing.JOB)
-                if out_handler is not None:
-                    out_handler.setLevel(printing.JOB)
-
-        if job_handler is not None:
-            job_handler.setLevel(job_level)
-        if out_handler is not None:
-            out_handler.setLevel(out_level)
-        self.analyze(P=P, style="full")
+        return [f"'{self.title}': {w}" for w in size_warnings(configuration)]
 
     def _read_md_file(self, path):
-        """The heat flux, interval, temperature and volume of one md.h5md."""
-        result = self._read_h5md(None, None, paths=[path])
+        """The heat flux, interval, temperature and volume of one md.h5md, noting
+        its length and whether it is isotropic."""
+        result = self._read_h5md(path)
         if result is None:
             raise RuntimeError(f"There is no heat flux in {path}.")
+        J, dt, _, _ = result
+        self._total_time += J.shape[1] * dt
+        with open_md(path) as md:
+            isotropic, why = isotropy(md)
+        # The runs are isotropic only if all are; otherwise say why not
+        if self._isotropy is None or (self._isotropy[0] and not isotropic):
+            self._isotropy = (isotropic, why)
         return result
 
     @staticmethod
@@ -1066,32 +934,23 @@ class ThermalConductivity(seamm.Node):
             )
         return [(J[:, i * n : (i + 1) * n], dt, T, V) for i in range(n_blocks)]
 
-    def _read_h5md(self, run, run_dir, paths=None):
-        """The heat flux, temperature and volume from md.h5md, if any.
+    @staticmethod
+    def _read_h5md(path):
+        """The heat flux, temperature and volume in an md.h5md file.
 
         Returns
         -------
         (numpy.ndarray(3, n), pint.Quantity, float, float) or None
             The heat flux in W/m^2, the interval between samples, the mean
-            temperature in K and the mean volume in Å^3; or None if no md.h5md in
-            the run has the heat flux, so the older files must be read.
+            temperature in K and the mean volume in Å^3; or None if the file has no
+            heat flux.
         """
-        if paths is None:
-            paths = []
-            for path in sorted(run_dir.glob("**/md.h5md")):
-                with open_md(path) as md:
-                    if md.has_observable("heat_flux"):
-                        paths.append(path)
-        if len(paths) == 0:
-            return None
-        if len(paths) > 1:
-            raise NotImplementedError(
-                f"Cannot handle the heat flux from more than one MD run in run {run}."
-            )
-        with open_md(paths[0]) as md:
+        with open_md(path) as md:
+            if not md.has_observable("heat_flux"):
+                return None
             if not md.periodic:
                 raise RuntimeError(
-                    f"The MD in {paths[0]} is not periodic, so it has no thermal "
+                    f"The MD in {path} is not periodic, so it has no thermal "
                     "conductivity."
                 )
             flux = md.observable("heat_flux", units="W/m^2", time_units="fs")
@@ -1101,56 +960,3 @@ class ThermalConductivity(seamm.Node):
             else:
                 V = float(abs(np.linalg.det(md.cell(units="Å"))))
         return flux.values.T, flux.dt, T, V
-
-    def _read_legacy(self, run, run_dir):
-        """The heat flux, temperature and volume from older LAMMPS step files."""
-        paths = sorted(run_dir.glob("**/heat_flux.trj"))
-
-        if len(paths) == 0:
-            raise RuntimeError(
-                f"There is no heat flux data for run {run} in {run_dir}."
-            )
-        elif len(paths) > 1:
-            raise NotImplementedError(
-                f"Cannot handle multiple HeatFlux files from run {run} in {run_dir}."
-            )
-
-        # Process the trajectory data
-        metadata, columns = read_trajectory(paths[0])
-        dt = Q_(metadata["dt"], metadata["tunits"])
-        J = np.stack((columns["Jx"], columns["Jy"], columns["Jz"]))
-
-        # Get the state function V & T
-        path = paths[0].parent / "state.json"
-        if not path.exists():
-            raise RuntimeError(
-                f"The temperature and volume of run {run} are missing ({path})."
-            )
-        with path.open() as fd:
-            state = json.load(fd)
-        T = state["T"]["mean"]
-        if "V" in state:
-            V = state["V"]["mean"]
-        else:
-            _, configuration = self.get_system_configuration()
-            V = configuration.volume
-        return J, dt, T, V
-
-    def set_id(self, node_id=()):
-        """Sequentially number the subnodes"""
-        self.logger.debug("Setting ids for subflowchart {}".format(self))
-        if self.visited:
-            return None
-        else:
-            self.visited = True
-            self._id = node_id
-            self.set_subids(self._id)
-            return self.next()
-
-    def set_subids(self, node_id=()):
-        """Set the ids of the nodes in the subflowchart"""
-        node = self.subflowchart.get_node("1").next()
-        n = 1
-        while node is not None:
-            node = node.set_id((*node_id, str(n)))
-            n += 1

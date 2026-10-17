@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 
-"""Smoke test of the Tk dialog: create it and re-lay it out for every choice of
-the MD to analyze. Skipped when no display is available."""
+"""Smoke test of the Tk dialog: create it and re-lay it out for every choice that
+drives the layout, checking the controls shown are those whose rules apply.
+Skipped when no display is available."""
 
 import pytest
 
-from seamm_md_analysis.step_support import read_files, run_own_md, source_choices
+from seamm_md_analysis.step_support import source_choices
 
 
 @pytest.fixture()
@@ -36,15 +37,16 @@ def tk_node():
 
 
 def test_dialog_layouts(tk_node):
+    from thermal_conductivity_step import ThermalConductivityParameters
+
     tk_node.create_dialog()
     tk_node.reset_dialog()
-    notebook = tk_node["notebook"]
-    tab = str(tk_node["flowchart frame"])
+    P = tk_node.node.parameters
+    assert "notebook" not in tk_node._widget
     for source in source_choices:
         tk_node["md source"].set(source)
-        tk_node.reset_conductivity_frame()
-        own = source == run_own_md
-        assert (tk_node["nruns"].grid_info() != {}) == own
-        assert (tk_node["md files"].grid_info() != {}) == (source == read_files)
-        assert (tk_node["number of blocks"].grid_info() != {}) == (not own)
-        assert (notebook.tab(tab, "state") == "hidden") == (not own)
+        tk_node.reset_dialog()
+        values = {k: tk_node[k].get() for k in ThermalConductivityParameters.parameters}
+        for key in ThermalConductivityParameters.parameters:
+            shown = tk_node[key].grid_info() != {}
+            assert shown == P.applies(key, values), (key, source)

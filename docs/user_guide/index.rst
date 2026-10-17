@@ -4,79 +4,108 @@
 User Guide
 **********
 
-The Thermal Conductivity step calculates the thermal conductivity from the
-fluctuations of the heat flux in equilibrium molecular dynamics. Its subflowchart
-contains the molecular dynamics, normally a LAMMPS step ending with the Heat Flux
-sub-step, and is run several times, each run starting from new velocities. The heat
-flux is sampled every two timesteps, which is needed to follow its fastest
-oscillations; sampling it more coarsely gives wrong results for molecules with fast
-vibrations, such as water.
+The Thermal Conductivity step calculates the thermal conductivity κ from the
+fluctuations of the heat flux J in equilibrium molecular dynamics. By Green and Kubo,
 
-The step reports the thermal conductivity in three ways, which should agree within
-their errors:
+.. math::
+
+   \kappa_{ab} = \frac{V}{k_B T^2} \int_0^\infty \langle J_a(t) J_b(0) \rangle \, dt
+
+with V the volume and T the temperature. The step reports κ in three ways, which
+should agree within their errors:
 
 Green-Kubo
     The plateau of the running integral of the autocorrelation function of the heat
     flux, fitted by one or, if justified by the data, two rising exponentials.
-Helfand Moments
-    The slope of the Helfand moments, the integral of the heat flux squared, at
-    long times. This also gives the off-diagonal elements of the tensor, which
-    should be zero within their errors for a fluid.
-Helfand Derivative
-    The plateau of the derivative of the Helfand moments, fitted like the
-    Green-Kubo integral.
+Helfand moments
+    The slope at long times of the Helfand moments, the mean square of the integral
+    of the heat flux.
+Helfand derivative
+    The plateau of the derivative of the Helfand moments, fitted like the Green-Kubo
+    integral.
 
-Each value is fitted to the average over the runs. Its error, given as a 95%
-interval (twice the standard error), comes from the spread of the values fitted to
-each run separately, so at least two runs are needed for errors, and more runs give
-better ones. With a single run no errors are reported.
-
-The step needs a periodic system, since the heat flux is divided by the volume of the
-cell; it stops before running any MD if the structure is not periodic. It reads the
-heat flux, the temperature and the volume from the ``md.h5md`` file that the LAMMPS
-step writes for each MD run. Runs made with older versions of the LAMMPS step, which
-have no ``md.h5md``, are read from their text files as before.
-
+The heat flux must be sampled every two timesteps to follow its fastest oscillations;
+sampling it more coarsely gives wrong results for molecules with fast vibrations, such
+as water. The step needs a periodic system, since the heat flux is divided by the
+volume of the cell.
 
 Where the MD comes from
 =======================
 
-**MD to analyze** chooses where the MD comes from:
+The step analyzes MD that ran before it in the flowchart, or the ``md.h5md`` files of
+earlier runs. For independent runs, put the MD in a Loop -- in parallel, with each
+run starting from the same structure ("Discard the structure" in the MD sub-steps)
+and new velocities -- and analyze "the last MD run of each loop iteration", the
+default. A typical flowchart:
 
-run the MD in the sub-flowchart
-    As before: the step runs its sub-flowchart, usually a LAMMPS step, the given
-    number of times, and the errors come from the spread of the runs. Sampling that
-    the analysis needs and the MD lacks is turned on in the last MD sub-step, with a
-    note in the output.
-the last MD run
-    The last MD run earlier in the flowchart that sampled what the step needs. One
-    production run can feed several analysis steps, and the sub-flowchart is not used.
+.. code-block:: text
+
+    Model Chemistry (FF@...), Packmol, minimization
+    NPT equilibration; Set Cell to its mean volume; NVT equilibration
+    Loop over the replicas (parallel)
+        LAMMPS: velocities, NVT decorrelation, NVT production sampling the heat flux
+    Thermal Conductivity
+
+**MD to analyze** chooses the runs:
+
 the last MD run of each loop iteration
-    For a LAMMPS step inside a Loop: the run of each iteration, analyzed as
-    independent runs.
+    The run of each iteration of the loop around the MD, analyzed as independent
+    runs; without a loop, the one run. This is the default.
+the last MD run
+    The last MD run earlier in the flowchart that sampled the heat flux. One
+    production run can feed several analysis steps.
 files
     The ``md.h5md`` files given, each an independent run; ``job://<n>/<path>`` reads a
     file of job ``n``.
 
-A single run is divided into **Blocks for errors from one run** (5 by default),
-analyzed separately to estimate the errors; each block must be much longer than the
-correlation time, and at least 10 ps long, as must each run. Before the job runs, the step checks that the MD before it samples
-what it needs, and the job does not start if it does not.
+The MD must sample the heat flux every two timesteps: "Heat flux" in the LAMMPS NVT
+sub-step (the Heat Flux sub-step does too, but runs NVE). Checking the flowchart before it runs
+reports what is missing, with a fix that turns the sampling on. It also warns when the
+analysis is inside the loop holding its MD, when the loop changes the temperature or
+pressure (the runs are then not replicas of one state), and when the thermostat
+perturbs the dynamics (Langevin, Andersen) or there is none (NVE): use NVT with a
+Nosé-Hoover or CSVR thermostat for the production runs. Before the MD runs, the step
+warns if the system is small for the analysis (fewer than about 200 molecules).
 
-The step needs the heat flux sampled every two timesteps, as the Heat Flux sub-step of
-LAMMPS does. MD from elsewhere is analyzed by the Green-Kubo approach at its own
-temperature.
+Each run, and each block of a single run, must be at least 10 ps long, and much longer
+than the correlation time of the heat flux; a few hundred picoseconds per run is
+typical for a liquid.
 
-..
-    <remove the dots above and this line and unindent the toctree to expose it>
-    Contents:
+Convergence and errors
+======================
 
-    .. toctree::
-       :glob:
-       :maxdepth: 2
-       :titlesonly:
+Each method is fitted to each run, and the three diagonal components are averaged
+within each run. κ is the mean of these averages over the runs, and its error is from
+their spread: the table gives the 95% confidence interval (Student's t times the
+standard error) and says so. A single run is divided into **Blocks for errors from one
+run** (5 by default), analyzed in the same way. With one run in one block there is no
+error estimate.
 
-       *
+For an isotropic run -- a cubic cell with nothing directional in it, such as walls or
+an electric field -- the table gives one value per method, and a line checks that the
+diagonal components agree within their errors (χ²) and that the off-diagonal terms
+κ_xy, κ_xz and κ_yz, from the Helfand moments, are zero within theirs. Otherwise the
+diagonal components are given too. The values of each run or block, with the
+components, are in the step's detailed output (``step.out``).
+
+The step graphs the correlation functions of the heat flux (``JJ.graph``), the
+Green-Kubo integrals (``GK_integral.graph``), the Helfand moments
+(``HelfandMoments.graph``) and their derivatives (``HelfandDerivatives.graph``),
+averaged over the runs, with their fits.
+
+Results
+=======
+
+* κ with its standard error by each method (``kappa``, ``kappa (Helfand)`` and
+  ``kappa (Helfand derivative)``), and the diagonal components by Green-Kubo
+  (``kappa_xx``, ``kappa_yy``, ``kappa_zz``);
+* the state of the runs: temperature, pressure, volume and density with their errors,
+  and for runs at constant volume the equilibrium density at the target pressure when
+  an NPT run before them gives the bulk modulus;
+* the number of runs.
+
+κ by Green-Kubo and from the Helfand moments, with their errors, can be stored as
+properties; all the results can be put in variables and tables.
 
 Indices and tables
 ==================

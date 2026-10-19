@@ -24,8 +24,12 @@ from seamm_md_analysis import (
     helfand_slope,
     isotropic_average,
     isotropy,
+    effective_correlation_functions,
+    flux_correlation_matrices,
+    flux_helfand_matrices,
     mean_and_stderr,
     open_md,
+    schur_complement,
     tensor_correlation_functions,
 )
 from seamm_md_analysis.requirements import Need, Requirements
@@ -176,6 +180,15 @@ class ThermalConductivity(seamm.Node):
         self.GK_integrals = []  # The running integrals of the Jcf's, of each
         self.GK_integral = None  # Their mean
         self.GK_integral_err = None  # Their spread
+        # For a mixture, the Green-Kubo integrals without the correction for the
+        # interdiffusion of the species, of each run or block
+        self.raw_GK_integrals = []
+        self._species = None  # The species of a mixture whose fluxes were sampled
+        # For a mixture, the matrices of the heat flux and species fluxes of each run
+        # or block: the correlation functions, their integrals, and Helfand moments
+        self._C_matrices = []
+        self._L_matrices = []
+        self._M_matrices = []
         self._total_time = Q_(0.0, "ps")  # The length of all the runs
         self._isotropy = None  # Whether the runs are isotropic, and why
 
@@ -267,6 +280,14 @@ class ThermalConductivity(seamm.Node):
         if len(self.paths) == 0:
             raise RuntimeError("No MD run finished, so there is nothing to analyze.")
         runs = [self._read_md_file(path) for path in self.paths]
+        if self._species is not None:
+            self.references.cite(
+                raw=self._bibliography["Bertossa2019"],
+                alias="Bertossa2019",
+                module="thermal_conductivity_step",
+                level=1,
+                note="The thermal conductivity of a mixture.",
+            )
 
         text = f"Analyzing {len(runs)} MD run{'s' if len(runs) > 1 else ''}"
         if len(runs) == 1:
@@ -284,11 +305,24 @@ class ThermalConductivity(seamm.Node):
             self.process_run(i, data, what="Block" if source == "blocks" else "Run")
         self._combine()
 
-        self.analyze(P=P, configuration=configuration, source=source)
+        self.analyze(
+            P=P,
+            configuration=configuration,
+            source=source,
+            uncorrected=self._uncorrected_mixture(configuration, runs),
+        )
 
         return next_node
 
-    def analyze(self, indent="", P=None, configuration=None, source="runs", **kwargs):
+    def analyze(
+        self,
+        indent="",
+        P=None,
+        configuration=None,
+        source="runs",
+        uncorrected=None,
+        **kwargs,
+    ):
         """Fit, print, plot and store the thermal conductivity.
 
         The value of each method is the average over the runs (or blocks) of the
@@ -306,6 +340,9 @@ class ThermalConductivity(seamm.Node):
             The configuration for the results.
         source : str
             What the samples are: "runs" or "blocks".
+        uncorrected : [str]
+            The species of a mixture whose mass fluxes were not sampled, so the
+            interdiffusion could not be removed; None for a pure substance.
         """
         n_samples = len(self.Ms)
         dt = Q_(self.timestep[0], "fs")
@@ -401,6 +438,7 @@ class ThermalConductivity(seamm.Node):
 
         # The values fitted to each run or block
         per_sample, off_diagonal = self._per_sample(ts, gk_ts, starts)
+        per_sample = self._pseudo_values(per_sample)
 
         estimates = {}
         components = {}
@@ -425,6 +463,24 @@ class ThermalConductivity(seamm.Node):
                     f"The {method} fit failed for {failed} of the {n_samples} "
                     f"{source}, which are left out."
                 )
+
+        if self._species is not None:
+            notes.append(self._mixture_note(gk_ts, source))
+        elif uncorrected is not None:
+            notes.append(
+                f"The system is a mixture of {len(uncorrected)} species, but the MD "
+                "did not sample their mass fluxes, so the energy carried by their "
+                "interdiffusion could not be removed: κ is too large, by as much as "
+                "40% for 1 m NaCl in water. Run the MD again with a current version "
+                "of the LAMMPS step, which samples them with the heat flux."
+            )
+            printer.important(
+                __(
+                    "Warning: the thermal conductivity of this mixture is too large: "
+                    "the MD did not sample the mass fluxes of the species.",
+                    indent=self.indent + 4 * " ",
+                )
+            )
 
         isotropic, why = self._isotropy
         table = {"Method": [], "κ": [], "± (95%)": [], "Units": []}
@@ -513,6 +569,58 @@ class ThermalConductivity(seamm.Node):
         if state is not None:
             data.update(state_data(state))
         self.store_results(configuration=configuration, data=data)
+
+    def _mixture_note(self, gk_ts, source):
+        """What the correction for the interdiffusion did, for the notes."""
+        values = np.full((len(self.raw_GK_integrals), 3), np.nan)
+        for s, integral in enumerate(self.raw_GK_integrals):
+            for i in range(3):
+                values[s, i] = _fit(fit_green_kubo_integral, integral[i], gk_ts)
+        raw = isotropic_average(values)
+        raw.source = source
+        raw.units = "W/m/K"
+        n = len(self._species)
+        text = (
+            f"The system is a mixture of {n} species, so the energy carried by "
+            "their interdiffusion, which is not conduction of heat, is removed from "
+            "the heat flux using the mass fluxes of the species (Bertossa et al., "
+            "Phys. Rev. Lett. 122, 255901 (2019))."
+        )
+        if len(self._L_matrices) > 1:
+            text += (
+                f" The correction uses the averages over the {source}, since that "
+                f"for a single one is too noisy, so the errors are from the {source} "
+                "by the jackknife (leaving out each in turn), and the values by "
+                f"{source[:-1]} in the detailed output are jackknife pseudo-values."
+            )
+        if raw.n > 0 and np.isfinite(raw.value):
+            value, error = raw.formatted()
+            if error != "":
+                value += f" ± {error}"
+            text += f" Without this correction Green-Kubo would give {value} W/m/K."
+        return text
+
+    def _uncorrected_mixture(self, configuration, runs):
+        """The species of a mixture whose MD has no species fluxes, or None.
+
+        Parameters
+        ----------
+        configuration : molsystem._Configuration
+            The system.
+        runs : [tuple]
+            The data of the runs.
+
+        Returns
+        -------
+        [str] or None
+        """
+        if self._species is not None or configuration is None:
+            return None
+        try:
+            species = sorted(set(configuration.get_molecule_smiles()))
+        except Exception:
+            return None
+        return species if len(species) > 1 else None
 
     def _per_sample(self, ts, gk_ts, starts):
         """κ fitted to each run or block, by each method.
@@ -793,13 +901,14 @@ class ThermalConductivity(seamm.Node):
         ----------
         run : int
             The number of the run or block, for messages.
-        data : (numpy.ndarray, pint.Quantity, float, float)
-            The heat flux (3 × n, W/m^2), the sampling interval, the temperature (K)
-            and the volume (Å^3).
+        data : (numpy.ndarray, pint.Quantity, float, float, numpy.ndarray)
+            The heat flux (3 × n, W/m^2), the sampling interval, the temperature
+            (K), the volume (Å^3), and for a mixture the mass fluxes of all the
+            species but one (k × 3 × n), or None.
         what : str
             "Run" or "Block", for messages.
         """
-        J, dt, T, V = data
+        J, dt, T, V, S = data
         self.V.append(V)
         self.T.append(T)
         self.timestep.append(dt.m_as("fs"))
@@ -820,22 +929,88 @@ class ThermalConductivity(seamm.Node):
             )
 
         # The Helfand moments
-        constants = Jsq * V * dt**2 / (2 * k_B * T**2)
-        M = collective_helfand_moments(J, m=m) * constants.m_as("W/m/K*ps")
+        constants = (Jsq * V * dt**2 / (2 * k_B * T**2)).m_as("W/m/K*ps")
+        M = collective_helfand_moments(J, m=m) * constants
         self.Ms.append(M)
+        if S is not None:
+            # For a mixture, also the matrices with the species' mass fluxes, from
+            # which _combine removes their interdiffusion
+            self._M_matrices.append(flux_helfand_matrices(J, S, m=m) * constants)
 
         # And correlation functions for Green-Kubo method
-        constants = V / (k_B * T**2) * Jsq * dt
+        constants = (V / (k_B * T**2) * Jsq * dt).m_as("W/m/K")
         Jcf, integral = tensor_correlation_functions(J, m=m)
         self.Jcfs.append(Jcf)
-        self.GK_integrals.append(integral * constants.m_as("W/m/K"))
+        self.GK_integrals.append(integral * constants)
+        if S is not None:
+            self.raw_GK_integrals.append(integral * constants)
+            C, L = flux_correlation_matrices(J, S, m=m)
+            self._C_matrices.append(C)
+            self._L_matrices.append(L * constants)
 
     def _combine(self):
-        """The averages of the curves over the runs or blocks, and their spread."""
+        """The averages of the curves over the runs or blocks, and their spread.
+
+        For a mixture the thermal conductivity is the Schur complement of the matrix
+        of the heat flux and the species' mass fluxes. The complement of a single
+        run or block is very noisy -- the species' part is small and poorly known --
+        so the matrices are averaged first. The diagonal curves of each run or block
+        are then those of the others (leave-one-out, or jackknife), whose fits
+        :meth:`analyze` turns into pseudo-values; their spread is scaled to match.
+        """
+        if len(self._L_matrices) > 0:
+            self._remove_interdiffusion()
         for name in ("M", "Jcf", "GK_integral"):
             curves = np.stack(getattr(self, name + "s"))
             setattr(self, name, np.average(curves, axis=0))
             setattr(self, name + "_err", np.std(curves, axis=0))
+        if len(self._L_matrices) > 0:
+            # The averages are the complements of the averaged matrices, and the
+            # spread of the leave-one-out curves is (n - 1) times too small
+            n = len(self._L_matrices)
+            C = np.mean(self._C_matrices, axis=0)
+            L = np.mean(self._L_matrices, axis=0)
+            self.M[:3] = schur_complement(np.mean(self._M_matrices, axis=0))
+            self.GK_integral[:3] = schur_complement(L)
+            self.Jcf[:3] = effective_correlation_functions(C, L)
+            for name in ("M", "Jcf", "GK_integral"):
+                getattr(self, name + "_err")[:3] *= max(1, n - 1)
+
+    def _remove_interdiffusion(self):
+        """Replace the diagonal curves of each run or block of a mixture by those
+        without the interdiffusion of the species: the Schur complements of the
+        matrices averaged over the other runs or blocks, or of the one there is."""
+        n = len(self._L_matrices)
+        averages = {}
+        for name in ("_C_matrices", "_L_matrices", "_M_matrices"):
+            averages[name] = np.mean(getattr(self, name), axis=0)
+
+        def others(name, i):
+            if n == 1:
+                return averages[name]
+            return (n * averages[name] - getattr(self, name)[i]) / (n - 1)
+
+        for i in range(n):
+            L = others("_L_matrices", i)
+            self.GK_integrals[i][:3] = schur_complement(L)
+            self.Jcfs[i][:3] = effective_correlation_functions(
+                others("_C_matrices", i), L
+            )
+            self.Ms[i][:3] = schur_complement(others("_M_matrices", i))
+
+    def _pseudo_values(self, per_sample):
+        """The jackknife pseudo-values from the fits to the leave-one-out curves of
+        a mixture: mean - (n - 1) (value - mean), whose mean and standard error are
+        the jackknife estimate and its error. Unchanged for a pure substance or a
+        single run or block."""
+        n = len(self._L_matrices)
+        if n < 2:
+            return per_sample
+        result = {}
+        for method, values in per_sample.items():
+            mean = np.nanmean(values, axis=0) if np.any(np.isfinite(values)) else 0.0
+            result[method] = mean - (n - 1) * (values - mean)
+        return result
 
     def md_requirements(self, P=None):
         """What the analysis needs from the MD: the heat flux every two steps, in a
@@ -899,12 +1074,29 @@ class ThermalConductivity(seamm.Node):
         return [f"'{self.title}': {w}" for w in size_warnings(configuration)]
 
     def _read_md_file(self, path):
-        """The heat flux, interval, temperature and volume of one md.h5md, noting
-        its length and whether it is isotropic."""
+        """The heat flux, interval, temperature, volume and species fluxes of one
+        md.h5md, noting its length, its species and whether it is isotropic."""
         result = self._read_h5md(path)
         if result is None:
             raise RuntimeError(f"There is no heat flux in {path}.")
-        J, dt, _, _ = result
+        J, dt, _, _, S, species = result
+        result = result[:5]
+        # Every run must be corrected for the interdiffusion of the species, or none
+        first = self._total_time.m == 0
+        if first:
+            self._species = species
+        elif (species is None) != (self._species is None):
+            raise RuntimeError(
+                f"Some of the runs sampled the mass fluxes of the species of the "
+                f"mixture, but not all of them ({path} "
+                f"{'did not' if species is None else 'did'}). Analyze runs made the "
+                "same way."
+            )
+        elif species != self._species:
+            raise RuntimeError(
+                f"The species of the MD in {path}, {', '.join(species)}, are not those "
+                f"of the other runs, {', '.join(self._species)}."
+            )
         self._total_time += J.shape[1] * dt
         with open_md(path) as md:
             isotropic, why = isotropy(md)
@@ -916,7 +1108,7 @@ class ThermalConductivity(seamm.Node):
     @staticmethod
     def _split_into_blocks(data, n_blocks):
         """Divide one run into consecutive blocks, analyzed as separate runs."""
-        J, dt, T, V = data
+        J, dt, T, V, S = data
         n_blocks = max(1, int(n_blocks))
         n = J.shape[1] // n_blocks
         if n * dt < MIN_RUN_TIME:
@@ -932,18 +1124,28 @@ class ThermalConductivity(seamm.Node):
                 f"{n_blocks} blocks: each block needs at least 2000 for the "
                 "correlation functions to be fitted. Use fewer blocks or a longer run."
             )
-        return [(J[:, i * n : (i + 1) * n], dt, T, V) for i in range(n_blocks)]
+        return [
+            (
+                J[:, i * n : (i + 1) * n],
+                dt,
+                T,
+                V,
+                None if S is None else S[..., i * n : (i + 1) * n],
+            )
+            for i in range(n_blocks)
+        ]
 
     @staticmethod
     def _read_h5md(path):
-        """The heat flux, temperature and volume in an md.h5md file.
+        """The heat flux, temperature, volume and species fluxes in an md.h5md file.
 
         Returns
         -------
-        (numpy.ndarray(3, n), pint.Quantity, float, float) or None
+        (numpy.ndarray(3, n), pint.Quantity, float, float, numpy.ndarray, [str])
             The heat flux in W/m^2, the interval between samples, the mean
-            temperature in K and the mean volume in Å^3; or None if the file has no
-            heat flux.
+            temperature in K, the mean volume in Å^3, and for a mixture the mass
+            fluxes of all the species but the first (k × 3 × n, in any units) and
+            the species, or None and None; or None if the file has no heat flux.
         """
         with open_md(path) as md:
             if not md.has_observable("heat_flux"):
@@ -959,4 +1161,20 @@ class ThermalConductivity(seamm.Node):
                 V = float(md.observable("volume", units="Å^3").values.mean())
             else:
                 V = float(abs(np.linalg.det(md.cell(units="Å"))))
-        return flux.values.T, flux.dt, T, V
+            J = flux.values.T
+            S = None
+            species = None
+            if md.has_observable("species_mass_flux"):
+                fluxes = md.observable("species_mass_flux")
+                species = list(fluxes.attrs.get("species", []))
+                if fluxes.values.shape[1] > 1:
+                    # The first species, with the most atoms, is fixed by the others
+                    # and the total momentum
+                    _, i, j = np.intersect1d(
+                        flux.steps, fluxes.steps, return_indices=True
+                    )
+                    J = J[:, i]
+                    S = fluxes.values[j, 1:, :].transpose(1, 2, 0)
+                else:
+                    species = None
+        return J, flux.dt, T, V, S, species

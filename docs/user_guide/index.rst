@@ -71,6 +71,41 @@ Each run, and each block of a single run, must be at least 10 ps long, and much 
 than the correlation time of the heat flux; a few hundred picoseconds per run is
 typical for a liquid.
 
+Mixtures
+========
+
+In a mixture -- a solution, or a mixture of liquids -- the molecules of the different
+species carry their energy with them as they diffuse past each other. This
+interdiffusion shows up in the heat flux, but it is not conduction of heat, and the
+Green-Kubo integral of the heat flux alone gives too large a thermal conductivity: for
+1 m NaCl in SPC/E water, about 1.15 W/m/K instead of 0.81.
+
+The step removes it following Bertossa, Grasselli, Ercole and Baroni (Phys. Rev. Lett.
+122, 255901 (2019)). With e the heat flux and J the mass fluxes of all the species but
+one (the last is fixed by the total momentum, which is zero),
+
+.. math::
+
+   \kappa = \frac{V}{k_B T^2} \left[ L_{ee} - L_{eJ} L_{JJ}^{-1} L_{Je} \right],
+   \qquad L_{ab} = \int_0^\infty \langle a(t) b(0) \rangle \, dt
+
+for each direction, and likewise for the Helfand moments. L\ :sub:`JJ` is small and
+poorly known from a single run or block -- for a dilute solution it comes from the
+diffusion of a few ions -- so the complement of each is very noisy. The step therefore
+averages the matrices over the runs or blocks before taking the complement, and gets
+the errors by the jackknife: each run or block is left out in turn, and the values by
+run or block in ``step.out`` are jackknife pseudo-values, whose mean and standard error
+are the estimate and its error. A few hundred picoseconds per run or block is
+needed for a dilute solution. The LAMMPS step samples the
+momentum of each species with the heat flux whenever the system has more than one kind
+of molecule (up to 16), so nothing needs to be set. The species are the distinct
+molecules, by their canonical SMILES; ions are species of their own. The notes under
+the table say that the correction was made and give the uncorrected Green-Kubo value.
+
+The MD must conserve the total momentum, as NVT with a Nosé-Hoover or CSVR thermostat
+does. If the system is a mixture but its MD did not sample the mass fluxes -- MD run
+with an older version of the LAMMPS step -- the step warns that κ is too large.
+
 Convergence and errors
 ======================
 

@@ -1,6 +1,18 @@
 =======
 History
 =======
+2026.10.18 -- Bugfix: the thermal conductivity of mixtures was too large
+    * In a mixture the heat flux includes the energy carried by the interdiffusion of
+      the species, which is not conduction of heat, so κ was too large: for 1 m NaCl in
+      SPC/E water about 1.15 W/m/K instead of 0.81. The step now removes it, using the
+      mass fluxes of the species that the LAMMPS step samples with the heat flux
+      (Bertossa, Grasselli, Ercole and Baroni, Phys. Rev. Lett. 122, 255901 (2019)), by
+      both Green-Kubo and the Helfand moments. The correction for one run or block is
+      too noisy, so it uses the averages over the runs or blocks, with errors by the
+      jackknife. The notes give the uncorrected value too.
+    * For a mixture whose MD did not sample the mass fluxes, made with an older LAMMPS
+      step, the step warns that κ is too large.
+
 2026.10.17 -- Analyze MD run before the step; one isotropic κ with labelled errors
     * The step analyzes MD run before it in the flowchart -- the runs of a Loop around
       the MD, as independent replicas ("the last MD run of each loop iteration", the

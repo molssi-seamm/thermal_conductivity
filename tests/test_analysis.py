@@ -46,7 +46,7 @@ def analyzed():
     tc = ThermalConductivity.__new__(ThermalConductivity)
     tc._reset()
     for run in range(1, 6):
-        tc.process_run(run, (ou_flux(10000, rng), dt, T, V))
+        tc.process_run(run, (ou_flux(10000, rng), dt, T, V, None))
     tc._combine()
     ts = (np.arange(tc.M.shape[1]) * dt.m_as("ps")).tolist()
     gk_ts = (np.arange(tc.GK_integral.shape[1]) * dt.m_as("ps")).tolist()
@@ -93,4 +93,69 @@ def test_short_block_is_refused():
     tc = ThermalConductivity.__new__(ThermalConductivity)
     tc._reset()
     with pytest.raises(RuntimeError, match="Block 1 is only"):
-        tc.process_run(1, (np.ones((3, 1000)), dt, T, V), what="Block")
+        tc.process_run(1, (np.ones((3, 1000)), dt, T, V, None), what="Block")
+
+
+def _analyze(tc):
+    tc._combine()
+    ts = (np.arange(tc.M.shape[1]) * dt.m_as("ps")).tolist()
+    gk_ts = (np.arange(tc.GK_integral.shape[1]) * dt.m_as("ps")).tolist()
+    per_sample, _ = tc._per_sample(ts, gk_ts, [1.0] * 6)
+    return tc._pseudo_values(per_sample), gk_ts
+
+
+@pytest.fixture(scope="module")
+def mixture():
+    """Five runs of a mixture of three species: the heat flux carries part of the
+    interdiffusion of two of them, which the analysis must remove. Also the
+    analysis of the same heat flux without that part."""
+    rng = np.random.default_rng(54321)
+    tc = ThermalConductivity.__new__(ThermalConductivity)
+    tc._reset()
+    tc._species = ["O", "[Na+]", "[Cl-]"]
+    plain = ThermalConductivity.__new__(ThermalConductivity)
+    plain._reset()
+    for run in range(1, 6):
+        J = ou_flux(10000, rng)
+        S = np.stack([ou_flux(10000, rng), ou_flux(10000, rng)]) * 1.0e-12
+        plain.process_run(run, (J, dt, T, V, None))
+        tc.process_run(run, (J + 1.0e12 * (2.0 * S[0] - 1.5 * S[1]), dt, T, V, S))
+    per_sample, gk_ts = _analyze(tc)
+    plain_per_sample, _ = _analyze(plain)
+    return tc, per_sample, plain_per_sample, gk_ts
+
+
+def test_mixture_removes_the_interdiffusion(mixture):
+    tc, per_sample, plain, gk_ts = mixture
+    kappa = expected_kappa()
+    for method, values in per_sample.items():
+        estimate = isotropic_average(values)
+        assert estimate.n == 5
+        # As the heat flux without the species' part, and near the exact value
+        expected = isotropic_average(plain[method]).value
+        assert estimate.value == pytest.approx(expected, rel=0.12), method
+        assert estimate.value == pytest.approx(kappa, rel=0.25), method
+        assert abs(estimate.value - kappa) < estimate.ci95, method
+    # The averaged curves are the complements of the averaged matrices
+    assert tc.GK_integral.shape == tc.GK_integrals[0].shape
+    # Without the correction it would be (1 + 4 + 2.25) times as large, though
+    # with much larger errors
+    note = tc._mixture_note(gk_ts, "runs")
+    assert note.startswith("The system is a mixture of 3 species")
+    assert "jackknife pseudo-values" in note
+    raw = float(note.split("would give ")[1].split()[0])
+    assert raw == pytest.approx(7.25 * kappa, rel=0.4)
+    assert " ± " in note
+
+
+def test_jackknife_pseudo_values():
+    tc = ThermalConductivity.__new__(ThermalConductivity)
+    tc._reset()
+    tc._L_matrices = [None] * 4
+    loo = {"Green-Kubo": np.array([[1.0, 2.0, 3.0]] * 3 + [[2.0, 3.0, 4.0]])}
+    pseudo = tc._pseudo_values(loo)["Green-Kubo"]
+    # mean - (n - 1) (value - mean)
+    np.testing.assert_allclose(pseudo[:, 0], [2.0] * 3 + [-1.0])
+    assert pseudo[:, 0].mean() == pytest.approx(1.25)
+    tc._L_matrices = [None]
+    assert tc._pseudo_values(loo) is loo

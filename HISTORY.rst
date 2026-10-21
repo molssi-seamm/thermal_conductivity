@@ -1,6 +1,13 @@
 =======
 History
 =======
+2026.10.21 -- Bugfix: no thermal conductivity from an MD run over MDI
+    * When the forces of the MD came from an external engine over MDI -- a
+      machine-learned forcefield, for example -- LAMMPS has no per-atom energies or
+      stresses, so the heat flux held only its kinetic term and the step reported
+      meaningless values (72 ± 913 W/m/K for a carbonate electrolyte). The step now
+      says so and skips the analysis.
+
 2026.10.18 -- Bugfix: the thermal conductivity of mixtures was too large
     * In a mixture the heat flux includes the energy carried by the interdiffusion of
       the species, which is not conduction of heat, so κ was too large: for 1 m NaCl in

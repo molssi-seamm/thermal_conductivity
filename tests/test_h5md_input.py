@@ -121,3 +121,20 @@ def test_requirements():
     assert need.max_steps == 2
     assert requirements.periodic
     assert requirements.dynamics
+
+
+def test_external_engine_is_recognized(tmp_path):
+    """A run whose forces came from an MDI engine (an MLFF) has no per-atom energies
+    or stresses, so its heat flux is incomplete (ChemAI job 5357, 2026-10-21)."""
+    from thermal_conductivity_step.thermal_conductivity import external_engine
+
+    write(tmp_path / "md.h5md")
+    assert external_engine(tmp_path / "md.h5md") is None  # no fixes recorded
+    with H5MDWriter(tmp_path / "mdi.h5md") as w:
+        w.particles(ids=[1, 2], cell=cell, periodic=True)
+        w.parameters({"fixes": ["mdi/qm", "nvt"]})
+    assert external_engine(tmp_path / "mdi.h5md") == "mdi/qm"
+    with H5MDWriter(tmp_path / "ff.h5md") as w:
+        w.particles(ids=[1, 2], cell=cell, periodic=True)
+        w.parameters({"fixes": ["nvt", "shake"]})
+    assert external_engine(tmp_path / "ff.h5md") is None

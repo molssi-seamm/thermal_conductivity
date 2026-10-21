@@ -29,6 +29,12 @@ sampling it more coarsely gives wrong results for molecules with fast vibrations
 as water. The step needs a periodic system, since the heat flux is divided by the
 volume of the cell.
 
+The heat flux needs each atom's potential energy and stress, which LAMMPS computes for
+its own forcefields. When the forces come from an external engine over MDI -- a
+machine-learned forcefield or a quantum code -- LAMMPS has neither, and the heat flux
+would hold only its kinetic term, so the step says so and skips the analysis rather
+than report a meaningless value.
+
 Where the MD comes from
 =======================
 

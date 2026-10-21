@@ -94,6 +94,24 @@ if path.exists():
     molsystem.add_properties_from_file(csv_file)
 
 
+def external_engine(path):
+    """The fix through which an external engine supplied the forces of the MD in
+    ``path`` -- e.g. "mdi/qm" for a machine-learned forcefield or QM code over MDI --
+    or None. Such an engine gives LAMMPS no per-atom energies or stresses, so the
+    heat flux has only its kinetic term (2026-10-21: ChemAI job 5357 gave 72 ± 913
+    W/m/K for a carbonate electrolyte)."""
+    with open_md(path) as md:
+        fixes = md.parameters.get("fixes")
+    if fixes is None:
+        return None
+    if isinstance(fixes, str):
+        fixes = fixes.split()
+    for fix in fixes:
+        if str(fix).startswith("mdi"):
+            return str(fix)
+    return None
+
+
 def _fit(function, *args, **kwargs):
     """The value of a fit, or NaN if it fails."""
     try:
@@ -279,6 +297,20 @@ class ThermalConductivity(seamm.Node):
         self.paths = md_inputs(self, P, name="heat_flux")
         if len(self.paths) == 0:
             raise RuntimeError("No MD run finished, so there is nothing to analyze.")
+        fix = external_engine(self.paths[0])
+        if fix is not None:
+            printer.important(
+                __(
+                    f"The forces in the MD came from an external engine (fix {fix}), "
+                    "such as a machine-learned forcefield over MDI, which gives LAMMPS "
+                    "no per-atom energies or stresses. The heat flux then lacks its "
+                    "potential-energy and virial terms, so there is no thermal "
+                    "conductivity to calculate: skipped.",
+                    indent=self.indent + 4 * " ",
+                )
+            )
+            printer.important("")
+            return next_node
         runs = [self._read_md_file(path) for path in self.paths]
         if self._species is not None:
             self.references.cite(

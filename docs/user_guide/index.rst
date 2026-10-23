@@ -24,10 +24,15 @@ Helfand derivative
     The plateau of the derivative of the Helfand moments, fitted like the Green-Kubo
     integral.
 
-The heat flux must be sampled every two timesteps to follow its fastest oscillations;
-sampling it more coarsely gives wrong results for molecules with fast vibrations, such
-as water. The step needs a periodic system, since the heat flux is divided by the
-volume of the cell.
+The heat flux must be sampled at least every 4 fs. Sampling every Δt adds the flux's
+power at 1/Δt and its multiples to the Green-Kubo integral, and molecules with X-H
+bonds have a strong band at twice the X-H stretch, up to about 7400 cm\ :sup:`-1` for
+O-H in water: 4 fs (8340 cm\ :sup:`-1`) stays clear of it, while 5 fs does not for
+water and 10 fs added about 20 % to the conductivity of a carbonate electrolyte. Each
+sample is expensive -- the per-atom stress, including the long-range electrostatics,
+costs about two MD steps -- so sampling every 4 fs rather than every 2 makes such a
+production run about a quarter faster. The step needs a periodic system, since the
+heat flux is divided by the volume of the cell.
 
 The heat flux needs each atom's potential energy and stress, which LAMMPS computes for
 its own forcefields. When the forces come from an external engine over MDI -- a
@@ -64,7 +69,7 @@ files
     The ``md.h5md`` files given, each an independent run; ``job://<n>/<path>`` reads a
     file of job ``n``.
 
-The MD must sample the heat flux every two timesteps: "Heat flux" in the LAMMPS NVT
+The MD must sample the heat flux at least every 4 fs: "Heat flux" in the LAMMPS NVT
 sub-step (the Heat Flux sub-step does too, but runs NVE). Checking the flowchart before it runs
 reports what is missing, with a fix that turns the sampling on. It also warns when the
 analysis is inside the loop holding its MD, when the loop changes the temperature or

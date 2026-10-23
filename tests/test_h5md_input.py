@@ -118,7 +118,8 @@ def test_requirements():
     requirements = tc.md_requirements()
     (need,) = requirements.needs
     assert need.names == ["heat_flux"]
-    assert need.max_steps == 2
+    assert need.max_steps is None
+    assert str(need.max_time) == str(Q_(4, "fs"))
     assert requirements.periodic
     assert requirements.dynamics
 

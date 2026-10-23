@@ -1045,14 +1045,23 @@ class ThermalConductivity(seamm.Node):
         return result
 
     def md_requirements(self, P=None):
-        """What the analysis needs from the MD: the heat flux every two steps, in a
-        periodic cell. It analyzes the dynamics."""
+        """What the analysis needs from the MD: the heat flux at least every 4 fs, in
+        a periodic cell. It analyzes the dynamics.
+
+        Sampling every dt adds the flux's power at 1/dt and its multiples to the
+        Green-Kubo integral. The flux of molecules with X-H bonds has a strong band
+        at twice the X-H stretch, up to ~7400 cm^-1 for O-H: 4 fs (8340 cm^-1) stays
+        above it, 5 fs (6670 cm^-1) does not for water, and 10 fs aliases ~20 % of
+        the conductivity for an electrolyte (SEAMM job 5368, 2026-10-22)."""
         return Requirements(
             needs=[
                 Need(
                     "heat_flux",
-                    max_steps=2,
-                    why="the thermal conductivity, to follow its fastest oscillations",
+                    max_time="4 fs",
+                    why=(
+                        "the thermal conductivity, sampled finely enough not to alias "
+                        "its fastest oscillations"
+                    ),
                 )
             ],
             periodic=True,

@@ -1,6 +1,15 @@
 =======
 History
 =======
+2026.10.22 -- The heat flux may be sampled every 4 fs
+    * The step needed the heat flux every two timesteps. It now needs it at least
+      every 4 fs, which is as fine as the Green-Kubo integral needs: tested on an
+      electrolyte's heat flux, 4 fs aliases 0.05 % of the conductivity into it, 10 fs
+      about 20 %. Each sample costs about two MD steps, so sampling every 4 fs rather
+      than every 2 makes a production run about a quarter faster.
+    * The fix offered by the check of the flowchart now sets 4 fs, and the user guide
+      explains the choice.
+
 2026.10.21 -- Bugfix: no thermal conductivity from an MD run over MDI
     * When the forces of the MD came from an external engine over MDI -- a
       machine-learned forcefield, for example -- LAMMPS has no per-atom energies or
